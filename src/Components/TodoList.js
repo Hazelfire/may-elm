@@ -8,6 +8,8 @@ import FolderHeader from './FolderHeader';
 import TaskModal from './TaskModal';
 import FolderModal from './FolderModal';
 import { ADD_TASK, DELETE_TASK, EDIT_TASK, ADD_FOLDER, EDIT_FOLDER, DELETE_FOLDER, SET_FOLDER } from '../actions';
+import ElmComponent from './TodoList.elm';
+import Elm from 'react-elm-components';
          
 
 type Props = {
@@ -48,7 +50,19 @@ export default class TodoList extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
   }
+  componentDidUpdate(prevProps, prevState, snapshot) {
+    this.ports.setState.send(this.state);
+  }
 
+  setupPorts = (ports) => {
+    this.state.ports = ports;
+  }
+
+  render(){
+    return <Elm src={ElmComponent.Elm.Components.TodoList} flags={this.props} />
+  }
+}
+/*
   addTask = (task) => 
     this.props.dispatch({
       type: ADD_TASK,
@@ -221,3 +235,4 @@ export default class TodoList extends Component<Props, State> {
     );
   }
 }
+*/

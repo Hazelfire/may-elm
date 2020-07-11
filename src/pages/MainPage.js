@@ -20,9 +20,9 @@ export default class MainPage extends Component{
     else {
       this.state = {
         tasks: [],
-        folders: [{name: "My Tasks", id: 'root', root: true}],
+        folders: [{name: "My Tasks", id: 'root', parent: null}],
         labels: [],
-        currentFolder: {name:"My Tasks", id: 'root', root: true}
+        currentFolder: {name:"My Tasks", id: 'root', parent: null}
       };
     }
   }

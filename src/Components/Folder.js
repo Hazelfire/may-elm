@@ -5,6 +5,10 @@ import FolderModal from './FolderModal';
 import MoveModal from './MoveModal';
 import { SET_FOLDER } from '../actions.js';
 
+import Elm from 'react-elm-components'
+
+export default (props) => <div></div>
+/*
 export default class Folder extends Component {
   constructor(props) {
     super(props);
@@ -13,6 +17,20 @@ export default class Folder extends Component {
       tasks: [],
     };
   }
+
+  componentDidUpdate(prevProps, prevState, snapshot) {
+    this.ports.setState.send(this.state);
+  }
+
+  setupPorts = (ports) => {
+    this.state.ports = ports;
+  }
+
+  render(){
+    return <Elm src={ElmComponent.Elm.Components.Folder} flags={this.props.folder} />
+  }
+}
+  /*
 
   confirmDeletion = () => {
     this.setState({
@@ -39,44 +57,6 @@ export default class Folder extends Component {
             <Icon name="folder" />
             {name}
           </Card.Header>
-          {/*
-          {status.add.loading && (
-            <Card.Meta>
-              <Icon name="sync" loading />
-              Saving Folder
-            </Card.Meta>
-          )}
-          {status.edit.loading && (
-            <Card.Meta>
-              <Icon name="sync" loading />
-              Updating Folder
-            </Card.Meta>
-          )}
-          {status.delete.loading && (
-            <Card.Meta>
-              <Icon name="sync" loading />
-              Deleting Folder
-            </Card.Meta>
-          )}
-
-          {status.add.error && (
-            <Card.Meta>
-              <Icon name="warning sign" />
-              {status.add.error}
-            </Card.Meta>
-          )}
-          {status.edit.error && (
-            <Card.Meta>
-              <Icon name="warning sign" />
-              {status.edit.error}
-            </Card.Meta>
-          )}
-          {status.delete.error && (
-            <Card.Meta>
-              <Icon name="warning sign" />
-              {status.delete.error}
-            </Card.Meta>
-          )}*/}
         </Card.Content>
         <Card.Content>
           <Button.Group>
@@ -128,4 +108,4 @@ export default class Folder extends Component {
       </Card>
     );
   };
-}
+}*/

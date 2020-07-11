@@ -36,7 +36,7 @@ export default (action, state) => {
 } 
 
 function generateID(){
-  return new Date().getTime();
+  return "" + new Date().getTime();
 }
 
 
