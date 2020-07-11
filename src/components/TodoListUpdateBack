@@ -1,0 +1,88 @@
+
+
+  addTask = (task) => {
+    let newTask = {
+      ...task, 
+      parent: this.state.currentFolder.id,
+      id: generateID()
+    }
+    this.setState({tasks: this.state.tasks.concat([newTask])});
+  };
+
+  deleteFolder = (folder) => {
+    this.setState({
+      folders: this.state.folders.filter(f => f.id !== folder.id)
+    });
+  }
+
+  editFolder = (folder, changes) => {
+    this.setState({
+      folders: this.state.folders.map(f => {
+        if(f.id === folder.id){
+           return { ...f, ...changes};
+        }
+        return f
+      })
+    });
+  }
+
+  moveFolder = (folder, directory) => {
+    this.setState({
+      folders: this.state.folders.map(f => {
+        if(f.id === folder.id){
+           return {...f, parent: directory.id}
+        }
+        return f;
+      })
+    });
+  }
+
+  deleteTask = (task) => {
+    this.setState({
+      tasks: this.state.tasks.filter(t => t.id !== task.id)
+    });
+  }
+
+  editTask = (task, changes) => {
+    this.setState({
+      tasks: this.state.tasks.map(t => {
+        if(t.id === task.id){
+           return { ...t, ...changes};
+        }
+        return t;
+      })
+    });
+  }
+
+  moveTask = (task, directory) => {
+    this.setState({
+      tasks: this.state.tasks.map(t => {
+        if(t.id === task.id){
+           return {...t, parent: directory.id}
+        }
+        return t;
+      })
+    });
+  }
+
+
+  openFolder = folder => {
+    this.setState({
+      currentFolder: folder
+    })
+  }
+
+  onAddFolder = (folder) => {
+    let newFolder = {
+      ...folder, 
+      parent: this.state.currentFolder.id,
+      id: generateID()
+    }
+    this.setState({folders: this.state.folders.concat([newFolder])});
+  }
+
+  backFolder = () => {
+    let parentFolder = this.state.folders.find(f => f.id === this.state.currentFolder.parent)
+    this.setState({currentFolder: parentFolder});
+  }
+

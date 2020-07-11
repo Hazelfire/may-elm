@@ -1,0 +1,17 @@
+[ignore]
+.*/node_modules/.*
+.*/__mocks__/.*
+.*/coverage/.*
+.*/flow-typed/.*
+.*/dist/.*
+
+[include]
+
+[libs]
+flow-typed
+
+[lints]
+
+[options]
+
+[strict]

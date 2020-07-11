@@ -1,0 +1,10 @@
+session_name: React webpack
+windows:
+  - window_name: Code
+    layout: tiled
+    panes:
+      - direnv reload
+  - window_name: Webpack Server
+    layout: tiled
+    panes:
+      - yarn start
