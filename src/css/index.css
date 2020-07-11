@@ -53,3 +53,24 @@ body {
   heigh: auto !important;
   margin: 14px 10px 14px 10px !important;
 }
+
+.topbar {
+  background-color: white;
+  border-bottom: 1px solid grey;
+  overflow: auto;
+  padding: 0.5em;
+}
+
+.topbar:after {
+  content: "";
+  float: clear;
+}
+.leftmenubar {
+  display: block-inline;
+  float: left;
+}
+
+.rightmenubar {
+  display: block-inline;
+  float: right;
+}

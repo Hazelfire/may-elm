@@ -1,3 +1,5 @@
 node_modules/
+dist
+elm-stuff
 coverage/
 src/config.js

@@ -1,9 +1,9 @@
 import React, { Component } from 'react';
 
-import { Icon, Card, Button, Header, Confirm } from 'semantic-ui-react';
-import moment from 'moment';
+import { Icon, Card, Button, Confirm } from 'semantic-ui-react';
 import FolderModal from './FolderModal';
 import MoveModal from './MoveModal';
+import { SET_FOLDER } from '../actions.js';
 
 export default class Folder extends Component {
   constructor(props) {
@@ -30,11 +30,12 @@ export default class Folder extends Component {
   render = () => {
     const { id, name } = this.props.folder;
     const { selected } = this.props;
+    const folder = this.props.folder
 
     return (
       <Card style={selected ? { 'box-shadow': '0px 0px 5px 0px grey' } : {}}>
         <Card.Content textAlign="left">
-          <Card.Header as="a" onClick={this.props.onSelect}>
+          <Card.Header as="a" onClick={() => this.props.dispatch({ type: SET_FOLDER, folder})}>
             <Icon name="folder" />
             {name}
           </Card.Header>
@@ -75,7 +76,7 @@ export default class Folder extends Component {
               <Icon name="warning sign" />
               {status.delete.error}
             </Card.Meta>
-          )} */}
+          )}*/}
         </Card.Content>
         <Card.Content>
           <Button.Group>

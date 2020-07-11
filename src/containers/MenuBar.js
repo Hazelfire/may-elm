@@ -1,13 +1,10 @@
 import React, { Component } from 'react';
-import { connect } from 'react-redux';
 import LoginPopup from '../containers/Login/LoginPopup';
 import SignupPopup from '../containers/Login/SignupPopup';
-import { getGuestMode } from '../selectors';
-import { logout } from '../actions';
 
 import { Menu } from 'semantic-ui-react';
 
-class MenuBar extends Component {
+export default class MenuBar extends Component {
     constructor(props) {
         super(props);
     }
@@ -32,18 +29,3 @@ class MenuBar extends Component {
         )
     }
 }
-
-const mapStateToProps = (state, ownProps) => {
-  return {
-    guestMode: getGuestMode(state),
-    user: state.login.user,
-  }
-}
-
-const mapDispatchToProps = dispatch => ({
-  logout: () => {
-    dispatch(logout());
-  }
-})
-
-export default connect(mapStateToProps, mapDispatchToProps)(MenuBar)

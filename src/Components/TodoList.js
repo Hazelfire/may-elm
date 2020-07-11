@@ -4,6 +4,7 @@ import Task from './Todo';
 import Folder from './Folder';
 
 import { Card, Header, Icon, Segment, Button } from 'semantic-ui-react';
+import FolderHeader from './FolderHeader';
 import TaskModal from './TaskModal';
 import FolderModal from './FolderModal';
 import { ADD_TASK, DELETE_TASK, EDIT_TASK, ADD_FOLDER, EDIT_FOLDER, DELETE_FOLDER, SET_FOLDER } from '../actions';
@@ -124,7 +125,7 @@ export default class TodoList extends Component<Props, State> {
               Back
             </Button>
           )}
-          {currentFolder.name}
+          <FolderHeader name={currentFolder.name} />
           <FolderModal
             title="Add New Folder"
             buttonText="Add Folder"

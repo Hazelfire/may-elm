@@ -1,11 +1,12 @@
 const webpack = require('webpack');
 const path = require('path');
 const HtmlWebPackPlugin = require('html-webpack-plugin');
+const WorkboxPlugin = require('workbox-webpack-plugin');
 
 module.exports = {
   entry: {
     babel: 'babel-polyfill',
-    organiser: './src/index.js',
+    organiser: './src/index.js'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -58,12 +59,20 @@ module.exports = {
           loader: 'html-loader',
         },
       },
+      {
+        test: /\.elm$/,
+        exclude: [/elm-stuff/, /node_modules/],
+        use: {
+          loader: 'elm-webpack-loader',
+          options: {}
+        }
+      }
     ],
   },
   plugins: [
     new HtmlWebPackPlugin({
       template: './src/index.html',
-      filename: './organiser.html',
+      filename: './index.html',
       chunks: ['organiser'],
     }),
   //    new webpack.optimize.AggressiveMergingPlugin(),
@@ -72,6 +81,12 @@ module.exports = {
         NODE_ENV: JSON.stringify('production'),
       },
     }),
+    new WorkboxPlugin.GenerateSW({
+       // these options encourage the ServiceWorkers to get in there fast
+       // and not allow any straggling "old" SWs to hang around
+       clientsClaim: true,
+       skipWaiting: true,
+     })
   ],
   watch: false,
   watchOptions: {
