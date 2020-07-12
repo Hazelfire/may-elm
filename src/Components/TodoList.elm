@@ -12,16 +12,27 @@ import Random
 
 type alias Model =
     { stored : StoredModel
-    , editingFolderName : Bool
-    , workingFolderName : String
-    , confirmDeleteFolder : Bool
+    , ui : UIModel
     }
+
+
+type alias UIModel =
+    { workingEditField : String
+    , confirmDelete : Bool
+    , currentViewId : String
+    , currentViewType : ItemView
+    , editingName : Bool
+    }
+
+
+type ItemView
+    = TaskView
+    | FolderView
 
 
 type alias StoredModel =
     { tasks : List Task
     , folders : List F.Folder
-    , currentFolder : F.Folder
     , labels : List Label
     }
 
@@ -37,21 +48,23 @@ type alias Task =
 
 
 type Msg
-    = NewFolder String
-    | CreateFolder
+    = NewFolder String String
+    | NewTask String String
+    | CreateFolder String
+    | CreateTask String
     | SetFolder String
     | EditFolder EditFolderMsg
-    | DeleteCurrentFolder
+    | DeleteFolder String
     | ConfirmDeleteFolder
     | CloseConfirmDelete
-    | OpenTask Task
+    | OpenTask String
 
 
 type EditFolderMsg
     = StartEditFolderName
-    | SetFolderName
-    | ChangeFolderName String
-    | EditKeyDown Int
+    | SetFolderName String String
+    | ChangeName String String
+    | EditKeyDown String String Int
 
 
 type alias Label =
@@ -75,9 +88,13 @@ main =
 init : StoredModel -> ( Model, Cmd Msg )
 init stored =
     ( { stored = stored
-      , editingFolderName = False
-      , workingFolderName = ""
-      , confirmDeleteFolder = False
+      , ui =
+            { currentViewId = "root"
+            , confirmDelete = False
+            , workingEditField = ""
+            , currentViewType = FolderView
+            , editingName = False
+            }
       }
     , Cmd.none
     )
@@ -92,94 +109,123 @@ generateId =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update message model =
-    case message of
-        EditFolder msg ->
-            ( updateEditFolderName msg model, Cmd.none )
+    let
+        newModel =
+            case message of
+                EditFolder msg ->
+                    updateEditFolderName msg model
 
-        _ ->
-            let
-                storedModel =
-                    updateStored message model.stored
+                DeleteFolder id ->
+                    if id == model.ui.currentViewId then
+                        let
+                            parentId =
+                                (getFolderWithId model.ui.currentViewId model.stored.folders).parent
 
-                ( fullModel, randomCommand ) =
-                    updateRandom message { model | stored = storedModel }
-            in
-            ( updateUI message fullModel, randomCommand )
+                            uiModel =
+                                model.ui
+                        in
+                        case parentId of
+                            Just pid ->
+                                { model | ui = { uiModel | currentViewId = pid } }
+
+                            _ ->
+                                model
+
+                    else
+                        model
+
+                _ ->
+                    model
+
+        storedModel =
+            updateStored message newModel.stored
+
+        uiUpdatedModel =
+            updateUI message newModel.ui
+
+        ( fullModel, randomCommand ) =
+            updateRandom message { model | stored = storedModel, ui = uiUpdatedModel }
+    in
+    ( fullModel, randomCommand )
 
 
 updateEditFolderName : EditFolderMsg -> Model -> Model
 updateEditFolderName message model =
-    case message of
-        StartEditFolderName ->
-            { model | editingFolderName = True, workingFolderName = model.stored.currentFolder.name }
-
-        ChangeFolderName name ->
-            { model | workingFolderName = name }
-
-        SetFolderName ->
-            saveFolderName model
-
-        EditKeyDown key ->
-            if key == 13 then
-                saveFolderName model
-
-            else
-                model
-
-
-saveFolderName : Model -> Model
-saveFolderName model =
     let
-        newName =
-            model.workingFolderName
+        uiModel =
+            model.ui
 
-        storedModel =
-            model.stored
+        newUiModel =
+            case message of
+                StartEditFolderName ->
+                    { uiModel | editingName = True, workingEditField = (getFolderWithId uiModel.currentViewId model.stored.folders).name }
 
-        currentFolder =
-            model.stored.currentFolder
+                ChangeName _ name ->
+                    { uiModel | workingEditField = name }
 
-        newCurrentFolder =
-            { currentFolder | name = newName }
+                SetFolderName _ _ ->
+                    { uiModel | editingName = False, workingEditField = "" }
 
-        newFolders =
-            conditionalMap (.id >> (==) currentFolder.id) (\folder -> { folder | name = newName }) model.stored.folders
+                EditKeyDown _ _ key ->
+                    if key == 13 then
+                        { uiModel | editingName = False, workingEditField = "" }
 
-        newStoredModal =
-            { storedModel | folders = newFolders, currentFolder = newCurrentFolder }
+                    else
+                        uiModel
     in
-    { model | stored = newStoredModal, editingFolderName = False, workingFolderName = "" }
+    { model | ui = newUiModel }
+
+
+getFolderWithId : String -> List F.Folder -> F.Folder
+getFolderWithId id folder =
+    case List.filter (.id >> (==) id) folder of
+        x :: _ ->
+            x
+
+        _ ->
+            { id = "NULL", name = "Missing Folder", parent = Nothing }
+
+
+setFolderName : String -> String -> List F.Folder -> List F.Folder
+setFolderName id name model =
+    conditionalMap (.id >> (==) id) (\x -> { x | name = name }) model
 
 
 {-| This function is all about handling the Smaller UI messages
 -}
-updateUI : Msg -> Model -> Model
-updateUI message model =
+updateUI : Msg -> UIModel -> UIModel
+updateUI message uiModel =
     case message of
         ConfirmDeleteFolder ->
-            { model | confirmDeleteFolder = True, editingFolderName = False }
+            { uiModel | confirmDelete = True, editingName = False }
 
         CloseConfirmDelete ->
-            { model | confirmDeleteFolder = False }
+            { uiModel | confirmDelete = False }
 
-        DeleteCurrentFolder ->
-            { model | confirmDeleteFolder = False }
+        DeleteFolder _ ->
+            { uiModel | confirmDelete = False }
 
-        SetFolder _ ->
-            { model | confirmDeleteFolder = False, editingFolderName = False, workingFolderName = "" }
+        SetFolder folderId ->
+            { uiModel | confirmDelete = False, editingName = False, workingEditField = "", currentViewId = folderId, currentViewType = FolderView }
 
-        NewFolder _ ->
-            { model | editingFolderName = True, workingFolderName = "New Folder" }
+        NewFolder _ folderId ->
+            { uiModel | editingName = True, workingEditField = "New Folder", currentViewId = folderId }
+
+        NewTask _ task ->
+            { uiModel | currentViewId = task, editingName = True, currentViewType = TaskView }
 
         _ ->
-            model
+            uiModel
 
 
 updateRandom : Msg -> Model -> ( Model, Cmd Msg )
 updateRandom message model =
     case message of
-        CreateFolder ->
-            ( model, Random.generate NewFolder generateId )
+        CreateFolder parentId ->
+            ( model, Random.generate (NewFolder parentId) generateId )
+
+        CreateTask parentId ->
+            ( model, Random.generate (NewTask parentId) generateId )
 
         _ ->
             ( model, Cmd.none )
@@ -188,59 +234,47 @@ updateRandom message model =
 updateStored : Msg -> StoredModel -> StoredModel
 updateStored message model =
     case message of
-        NewFolder folderId ->
+        NewFolder parentId folderId ->
             let
                 newFolder =
-                    { id = folderId, name = "New Folder", parent = Just model.currentFolder.id }
+                    { id = folderId, name = "New Folder", parent = Just parentId }
 
                 newModel =
-                    { model | folders = model.folders ++ [ newFolder ], currentFolder = newFolder }
+                    { model | folders = model.folders ++ [ newFolder ] }
             in
             newModel
 
-        SetFolder folderId ->
+        NewTask parentId taskId ->
             let
-                parentFolders =
-                    List.filter (.id >> (==) folderId) model.folders
+                newTask =
+                    { id = taskId
+                    , name = "New Task"
+                    , parent = parentId
+                    , depedencies = []
+                    , duration = 0.0
+                    , labels = []
+                    }
 
                 newModel =
-                    case parentFolders of
-                        x :: _ ->
-                            { model | currentFolder = x }
-
-                        _ ->
-                            model
+                    { model | tasks = newTask :: model.tasks }
             in
             newModel
 
-        DeleteCurrentFolder ->
-            deleteCurrentFolder model
+        EditFolder (SetFolderName id name) ->
+            { model | folders = setFolderName id name model.folders }
+
+        EditFolder (EditKeyDown id name 13) ->
+            { model | folders = setFolderName id name model.folders }
 
         _ ->
             model
 
 
-deleteCurrentFolder : StoredModel -> StoredModel
-deleteCurrentFolder model =
-    let
-        parentId =
-            model.currentFolder.parent
-
-        parentFolders =
-            List.filter (.id >> Just >> (==) parentId) model.folders
-
-        newFolders =
-            List.filter (.id >> (/=) model.currentFolder.id) model.folders
-
-        newModel =
-            case parentFolders of
-                x :: _ ->
-                    { model | currentFolder = x, folders = newFolders }
-
-                _ ->
-                    model
-    in
-    newModel
+{-| String is the id of the folder that you wish to delete
+-}
+deleteFolder : String -> List F.Folder -> List F.Folder
+deleteFolder id folders =
+    List.filter (.id >> (/=) id) folders
 
 
 {-| Updates a product with a given name by a function
@@ -260,41 +294,47 @@ conditionalMap cond func list =
 
 {-| Gets all the folders in a directory
 -}
-getFoldersInFolder : List F.Folder -> F.Folder -> List F.Folder
-getFoldersInFolder folders parent =
-    List.filter (.parent >> (==) (Just parent.id)) folders
+getFoldersInFolder : List F.Folder -> String -> List F.Folder
+getFoldersInFolder folders parentId =
+    List.filter (.parent >> (==) (Just parentId)) folders
 
 
 {-| Gets all the folders in a directory recursively
 -}
-getFoldersInFolderRecursive : List F.Folder -> F.Folder -> List F.Folder
-getFoldersInFolderRecursive folders parent =
+getFoldersInFolderRecursive : List F.Folder -> String -> List F.Folder
+getFoldersInFolderRecursive folders parentId =
     let
         subFolders =
-            getFoldersInFolder folders parent
+            getFoldersInFolder folders parentId
+
+        subFoldersId =
+            List.map .id subFolders
     in
-    subFolders ++ List.concat (List.map (getFoldersInFolderRecursive folders) subFolders)
+    subFolders ++ List.concat (List.map (getFoldersInFolderRecursive folders) subFoldersId)
 
 
 {-| Gets all the tasks in a directory
 -}
-getTasksInFolder : List Task -> F.Folder -> List Task
-getTasksInFolder tasks parent =
-    List.filter (.parent >> (==) parent.id) tasks
+getTasksInFolder : List Task -> String -> List Task
+getTasksInFolder tasks parentId =
+    List.filter (.parent >> (==) parentId) tasks
 
 
 {-| Gets all the tasks in a directory recursively
 -}
-getTasksInFolderRecursive : List F.Folder -> List Task -> F.Folder -> List Task
-getTasksInFolderRecursive folders tasks parent =
+getTasksInFolderRecursive : List F.Folder -> List Task -> String -> List Task
+getTasksInFolderRecursive folders tasks parentId =
     let
         subTasks =
-            getTasksInFolder tasks parent
+            getTasksInFolder tasks parentId
 
         subFolders =
-            getFoldersInFolder folders parent
+            getFoldersInFolder folders parentId
+
+        subFoldersId =
+            List.map .id subFolders
     in
-    subTasks ++ List.concat (List.map (getTasksInFolderRecursive folders tasks) subFolders)
+    subTasks ++ List.concat (List.map (getTasksInFolderRecursive folders tasks) subFoldersId)
 
 
 onKeyDown : (Int -> msg) -> Attribute msg
@@ -304,56 +344,61 @@ onKeyDown tagger =
 
 view : Model -> Html Msg
 view model =
-    let
-        foldersInDirectory =
-            getFoldersInFolder model.stored.folders model.stored.currentFolder
+    case model.ui.currentViewType of
+        FolderView ->
+            let
+                foldersInDirectory =
+                    getFoldersInFolder model.stored.folders model.ui.currentViewId
 
-        tasksInDirectory =
-            getTasksInFolder model.stored.tasks model.stored.currentFolder
+                tasksInDirectory =
+                    getTasksInFolder model.stored.tasks model.ui.currentViewId
 
-        parentId =
-            model.stored.currentFolder.parent
-    in
-    div []
-        ([ h2 [ class "ui menu attached top" ]
-            ((case parentId of
-                Just pid ->
-                    [ a [ class "item", onClick (SetFolder pid) ] [ text "Back" ] ]
+                parentId =
+                    (getFolderWithId model.ui.currentViewId model.stored.folders).parent
+            in
+            div []
+                ([ h2 [ class "ui menu attached top" ]
+                    ((case parentId of
+                        Just pid ->
+                            [ a [ class "item", onClick (SetFolder pid) ] [ text "Back" ] ]
 
-                Nothing ->
-                    []
-             )
-                ++ (viewFolderHeader EditFolder model
-                        :: (case parentId of
-                                Just _ ->
-                                    [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDeleteFolder ] [ text "Delete" ] ] ]
+                        Nothing ->
+                            []
+                     )
+                        ++ (viewFolderHeader EditFolder model
+                                :: (case parentId of
+                                        Just _ ->
+                                            [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDeleteFolder ] [ text "Delete" ] ] ]
 
-                                Nothing ->
-                                    []
+                                        Nothing ->
+                                            []
+                                   )
                            )
-                   )
-            )
-         , div [ class "ui segment attached" ]
-            [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick CreateFolder ] [ text "Add" ] ]
-            , div [ class "ui cards" ] (List.map (F.viewFolder SetFolder) foldersInDirectory)
-            ]
-         , div [ class "ui segment attached" ]
-            [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick CreateFolder ] [ text "Add" ] ]
-            , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
-            ]
-         ]
-            ++ (if model.confirmDeleteFolder then
-                    [ viewConfirmDelete model ]
+                    )
+                 , div [ class "ui segment attached" ]
+                    [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick (CreateFolder model.ui.currentViewId) ] [ text "Add" ] ]
+                    , div [ class "ui cards" ] (List.map (F.viewFolder SetFolder) foldersInDirectory)
+                    ]
+                 , div [ class "ui segment attached" ]
+                    [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick (CreateTask model.ui.currentViewId) ] [ text "Add" ] ]
+                    , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
+                    ]
+                 ]
+                    ++ (if model.ui.confirmDelete then
+                            [ viewConfirmDelete model ]
 
-                else
-                    []
-               )
-        )
+                        else
+                            []
+                       )
+                )
+
+        TaskView ->
+            div [] []
 
 
 viewTask : Task -> Html Msg
 viewTask task =
-    a [ class "card", onClick (OpenTask task) ]
+    a [ class "card", onClick (OpenTask task.id) ]
         [ div [ class "content" ]
             [ div [ class "header" ]
                 [ i [ class "icon tasks" ] []
@@ -364,24 +409,38 @@ viewTask task =
 
 
 viewConfirmDelete : Model -> Html Msg
-viewConfirmDelete _ =
+viewConfirmDelete model =
+    let
+        taskCount =
+            List.length (getTasksInFolderRecursive model.stored.folders model.stored.tasks model.ui.currentViewId)
+    in
     div [ class "ui active modal" ]
         [ div [ class "header" ] [ text "Confirm Delete" ]
-        , div [ class "content" ] [ text "Are you sure you want to delete this folder?" ]
+        , div [ class "content" ] [ text <| "Are you sure you want to delete this folder? It has " ++ String.fromInt taskCount ++ " tasks in it that will get deleted" ]
         , div [ class "actions" ]
             [ div [ class "ui button green", onClick CloseConfirmDelete ] [ text "No" ]
-            , div [ class "ui button red cancel", onClick DeleteCurrentFolder ] [ text "Yes" ]
+            , div [ class "ui button red cancel", onClick (DeleteFolder model.ui.currentViewId) ] [ text "Yes" ]
             ]
         ]
 
 
 viewFolderHeader : (EditFolderMsg -> a) -> Model -> Html a
 viewFolderHeader messageContext model =
-    if model.editingFolderName then
-        div [ class "item ui input" ] [ input [ autofocus True, value model.workingFolderName, onKeyDown (EditKeyDown >> messageContext), onInput (ChangeFolderName >> messageContext), onBlur (messageContext SetFolderName) ] [] ]
+    let
+        folderId =
+            model.ui.currentViewId
+
+        folder =
+            getFolderWithId folderId model.stored.folders
+
+        workingFolderName =
+            model.ui.workingEditField
+    in
+    if model.ui.editingName then
+        div [ class "item ui input" ] [ input [ autofocus True, value workingFolderName, onKeyDown (EditKeyDown folderId workingFolderName >> messageContext), onInput (ChangeName folderId >> messageContext), onBlur (messageContext (SetFolderName folderId workingFolderName)) ] [] ]
 
     else
-        h2 [ class "item ui header", onClick (messageContext StartEditFolderName) ] [ text model.stored.currentFolder.name ]
+        h2 [ class "item ui header", onClick (messageContext StartEditFolderName) ] [ text folder.name ]
 
 
 subscriptions : Model -> Sub Msg
