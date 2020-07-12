@@ -186,6 +186,22 @@ getFolderWithId id folder =
             { id = "NULL", name = "Missing Folder", parent = Nothing }
 
 
+getTaskById : List Task -> String -> Task
+getTaskById tasks id =
+    case List.filter (.id >> (==) id) tasks of
+        x :: _ ->
+            x
+
+        _ ->
+            { id = "NULL_TASK"
+            , name = "Missing Task"
+            , duration = 0.0
+            , depedencies = []
+            , labels = []
+            , parent = "root"
+            }
+
+
 setFolderName : String -> String -> List F.Folder -> List F.Folder
 setFolderName id name model =
     conditionalMap (.id >> (==) id) (\x -> { x | name = name }) model
@@ -346,54 +362,73 @@ view : Model -> Html Msg
 view model =
     case model.ui.currentViewType of
         FolderView ->
-            let
-                foldersInDirectory =
-                    getFoldersInFolder model.stored.folders model.ui.currentViewId
-
-                tasksInDirectory =
-                    getTasksInFolder model.stored.tasks model.ui.currentViewId
-
-                parentId =
-                    (getFolderWithId model.ui.currentViewId model.stored.folders).parent
-            in
-            div []
-                ([ h2 [ class "ui menu attached top" ]
-                    ((case parentId of
-                        Just pid ->
-                            [ a [ class "item", onClick (SetFolder pid) ] [ text "Back" ] ]
-
-                        Nothing ->
-                            []
-                     )
-                        ++ (viewFolderHeader EditFolder model
-                                :: (case parentId of
-                                        Just _ ->
-                                            [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDeleteFolder ] [ text "Delete" ] ] ]
-
-                                        Nothing ->
-                                            []
-                                   )
-                           )
-                    )
-                 , div [ class "ui segment attached" ]
-                    [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick (CreateFolder model.ui.currentViewId) ] [ text "Add" ] ]
-                    , div [ class "ui cards" ] (List.map (F.viewFolder SetFolder) foldersInDirectory)
-                    ]
-                 , div [ class "ui segment attached" ]
-                    [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick (CreateTask model.ui.currentViewId) ] [ text "Add" ] ]
-                    , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
-                    ]
-                 ]
-                    ++ (if model.ui.confirmDelete then
-                            [ viewConfirmDelete model ]
-
-                        else
-                            []
-                       )
-                )
+            viewFolderDetails model
 
         TaskView ->
-            div [] []
+            viewTaskDetails model
+
+
+viewFolderDetails : Model -> Html Msg
+viewFolderDetails model =
+    let
+        foldersInDirectory =
+            getFoldersInFolder model.stored.folders model.ui.currentViewId
+
+        tasksInDirectory =
+            getTasksInFolder model.stored.tasks model.ui.currentViewId
+
+        parentId =
+            (getFolderWithId model.ui.currentViewId model.stored.folders).parent
+    in
+    div []
+        ([ h2 [ class "ui menu attached top" ]
+            ((case parentId of
+                Just pid ->
+                    [ a [ class "item", onClick (SetFolder pid) ] [ text "Back" ] ]
+
+                Nothing ->
+                    []
+             )
+                ++ (viewFolderHeader EditFolder model
+                        :: (case parentId of
+                                Just _ ->
+                                    [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDeleteFolder ] [ text "Delete" ] ] ]
+
+                                Nothing ->
+                                    []
+                           )
+                   )
+            )
+         , div [ class "ui segment attached" ]
+            [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick (CreateFolder model.ui.currentViewId) ] [ text "Add" ] ]
+            , div [ class "ui cards" ] (List.map (F.viewFolder SetFolder) foldersInDirectory)
+            ]
+         , div [ class "ui segment attached" ]
+            [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick (CreateTask model.ui.currentViewId) ] [ text "Add" ] ]
+            , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
+            ]
+         ]
+            ++ (if model.ui.confirmDelete then
+                    [ viewConfirmDelete model ]
+
+                else
+                    []
+               )
+        )
+
+
+viewTaskDetails : Model -> Html Msg
+viewTaskDetails model =
+    let
+        currentTask =
+            getTaskById model.stored.tasks model.ui.currentViewId
+    in
+    div [ class "ui header attached top" ] [ viewBackButton currentTask.parent, text currentTask.name ]
+
+
+viewBackButton : String -> Html Msg
+viewBackButton pid =
+    a [ class "item", onClick (SetFolder pid) ] [ text "Back" ]
 
 
 viewTask : Task -> Html Msg
