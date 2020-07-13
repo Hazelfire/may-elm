@@ -1,5 +1,6 @@
 module May.Task exposing
     ( Task
+    , duration
     , generate
     , id
     , name
@@ -40,3 +41,8 @@ id (Task task) =
 name : Task -> String
 name (Task task) =
     task.name
+
+
+duration : Task -> Float
+duration (Task task) =
+    task.duration

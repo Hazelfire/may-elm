@@ -8,13 +8,10 @@ module May.FolderList exposing
     , getParent
     , new
     , setFolderName
-    , tasksInFolder
-    , tasksInFolderRecursive
     )
 
 import May.Folder as Folder exposing (Folder)
 import May.FolderId exposing (FolderId)
-import May.Task as Task
 
 
 type FolderList
@@ -65,30 +62,6 @@ foldersInFolderRecursive folders parentId =
             List.map Folder.id subFolders
     in
     subFolders ++ List.concat (List.map (foldersInFolderRecursive folders) subFoldersId)
-
-
-{-| Gets all the tasks in a directory
--}
-tasksInFolder : List Task.Task -> FolderId -> List Task.Task
-tasksInFolder tasks parentId =
-    List.filter (Task.parent >> (==) parentId) tasks
-
-
-{-| Gets all the tasks in a directory recursively
--}
-tasksInFolderRecursive : FolderList -> List Task.Task -> FolderId -> List Task.Task
-tasksInFolderRecursive folders tasks parentId =
-    let
-        subTasks =
-            tasksInFolder tasks parentId
-
-        subFolders =
-            foldersInFolder folders parentId
-
-        subFoldersId =
-            List.map Folder.id subFolders
-    in
-    subTasks ++ List.concat (List.map (tasksInFolderRecursive folders tasks) subFoldersId)
 
 
 folderWithId : FolderList -> FolderId -> Maybe Folder

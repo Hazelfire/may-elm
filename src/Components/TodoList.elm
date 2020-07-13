@@ -1,16 +1,17 @@
 module Components.TodoList exposing (main)
 
 import Browser
-import Html exposing (Attribute, Html, a, button, div, h2, h3, i, input, text)
+import Html exposing (Attribute, Html, a, button, div, h2, h3, i, input, span, text)
 import Html.Attributes exposing (autofocus, class, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
 import Json.Decode as Json
 import May.Folder as Folder
 import May.FolderId as FolderId
 import May.FolderList as FolderList
-import May.FolderView as FolderView
 import May.Task as Task
+import May.TaskBrowser as TaskBrowser
 import May.TaskId as TaskId
+import May.TaskList as TaskList
 import Random
 
 
@@ -20,15 +21,10 @@ type Model
 
 
 type alias ReadyModel =
-    { tasks : List Task.Task
+    { tasks : TaskList.TaskList
     , folders : FolderList.FolderList
-    , ui : UIModel
+    , ui : TaskBrowser.TaskBrowser
     }
-
-
-type UIModel
-    = ShowingFolder FolderView.FolderView
-    | ShowingTask TaskView
 
 
 type TaskView
@@ -50,15 +46,14 @@ type Msg
     | NewTask Task.Task
     | CreateFolder FolderId.FolderId
     | CreateTask FolderId.FolderId
-    | SetFolder FolderId.FolderId
-    | DeleteFolder FolderId.FolderId
-    | ConfirmDeleteFolder
+    | SetView TaskBrowser.ItemId
+    | DeleteItem TaskBrowser.ItemId
+    | ConfirmDelete
     | CloseConfirmDelete
-    | OpenTask TaskId.TaskId
-    | StartEditFolderName
-    | SetFolderName FolderId.FolderId String
-    | ChangeName FolderId.FolderId String
-    | EditKeyDown FolderId.FolderId String Int
+    | StartEditName
+    | SetName TaskBrowser.ItemId String
+    | ChangeName TaskBrowser.ItemId String
+    | EditKeyDown TaskBrowser.ItemId String Int
     | CreateRootFolder Folder.Folder
 
 
@@ -98,9 +93,9 @@ update message model =
                 CreateRootFolder rootFolder ->
                     pure <|
                         Ready
-                            { tasks = []
+                            { tasks = TaskList.new
                             , folders = FolderList.new [ rootFolder ]
-                            , ui = ShowingFolder (FolderView.new (Folder.id rootFolder))
+                            , ui = TaskBrowser.new (TaskBrowser.ItemIdFolder (Folder.id rootFolder))
                             }
 
                 _ ->
@@ -118,88 +113,77 @@ update message model =
 -}
 updateReady : Msg -> ReadyModel -> ( ReadyModel, Cmd Msg )
 updateReady msg model =
-    case model.ui of
-        ShowingFolder folderModel ->
-            case msg of
-                DeleteFolder id ->
-                    pure <| deleteFolder id model
+    let
+        browser =
+            model.ui
+    in
+    case msg of
+        DeleteItem id ->
+            pure <| deleteItem id model
 
-                ConfirmDeleteFolder ->
-                    pure <| { model | ui = ShowingFolder (FolderView.confirmDelete folderModel) }
+        ConfirmDelete ->
+            pure <| { model | ui = TaskBrowser.confirmDelete browser }
 
-                CloseConfirmDelete ->
-                    pure <| { model | ui = ShowingFolder (FolderView.closeConfirmDelete folderModel) }
+        CloseConfirmDelete ->
+            pure <| { model | ui = TaskBrowser.closeConfirmDelete browser }
 
-                SetFolder folderId ->
-                    pure <| { model | ui = ShowingFolder (FolderView.new folderId) }
+        SetView viewId ->
+            pure <| { model | ui = TaskBrowser.new viewId }
 
-                NewFolder newFolder ->
-                    pure <| { model | folders = FolderList.addFolder model.folders newFolder, ui = ShowingFolder (FolderView.new (Folder.id newFolder)) }
+        NewFolder newFolder ->
+            pure <| { model | folders = FolderList.addFolder model.folders newFolder, ui = TaskBrowser.new (TaskBrowser.ItemIdFolder (Folder.id newFolder)) }
 
-                NewTask newTask ->
-                    pure <| { model | ui = ShowingTask (newTaskView (Task.id newTask)), tasks = newTask :: model.tasks }
+        NewTask newTask ->
+            pure <| { model | ui = TaskBrowser.new (TaskBrowser.ItemIdTask (Task.id newTask)), tasks = TaskList.addTask model.tasks newTask }
 
-                StartEditFolderName ->
-                    pure <| { model | ui = ShowingFolder (FolderView.editFolderName folderModel "") }
+        StartEditName ->
+            pure <| { model | ui = TaskBrowser.editName browser "" }
 
-                ChangeName _ name ->
-                    pure <| { model | ui = ShowingFolder (FolderView.editFolderName folderModel name) }
+        ChangeName _ name ->
+            pure <| { model | ui = TaskBrowser.editName browser name }
 
-                SetFolderName id name ->
-                    pure <| { model | folders = FolderList.setFolderName model.folders id name, ui = ShowingFolder (FolderView.finishEditFolderName folderModel) }
+        SetName id name ->
+            pure <| { model | folders = FolderList.setFolderName model.folders id name, ui = TaskBrowser.finishEditName browser }
 
-                EditKeyDown id name key ->
-                    pure <|
-                        if key == 13 then
-                            { model | folders = FolderList.setFolderName model.folders id name, ui = ShowingFolder (FolderView.finishEditFolderName folderModel) }
+        EditKeyDown id name key ->
+            pure <|
+                if key == 13 then
+                    { model | folders = FolderList.setFolderName model.folders id name, ui = TaskBrowser.finishEditName browser }
 
-                        else
-                            model
+                else
+                    model
 
-                CreateFolder parentId ->
-                    ( model, Random.generate NewFolder (Folder.generate parentId) )
+        CreateFolder parentId ->
+            ( model, Random.generate NewFolder (Folder.generate parentId) )
 
-                CreateTask parentId ->
-                    ( model, Random.generate NewTask (Task.generate parentId) )
+        CreateTask parentId ->
+            ( model, Random.generate NewTask (Task.generate parentId) )
 
-                _ ->
-                    pure model
-
-        ShowingTask taskModel ->
+        _ ->
             pure model
 
 
-deleteFolder : FolderId.FolderId -> ReadyModel -> ReadyModel
-deleteFolder id model =
+deleteItem : TaskBrowser.ItemId -> ReadyModel -> ReadyModel
+deleteItem id model =
     let
         newModel =
-            { model | folders = FolderList.delete model.folders id }
+            case id of
+                TaskBrowser.ItemIdFolder fid ->
+                    { model | folders = FolderList.delete model.folders fid }
+
+                TaskBrowser.ItemIdTask tid ->
+                    { model | folders = TaskList.delete model.folders tid }
     in
-    case newModel.ui of
-        ShowingFolder folderModel ->
-            if id == FolderView.currentFolder folderModel then
-                case FolderList.getParent model.folders (FolderView.currentFolder folderModel) of
-                    Just parentId ->
-                        { newModel | ui = ShowingFolder (FolderView.new parentId) }
+    if id == TaskBrowser.currentView model.ui then
+        case FolderList.getParent model.folders (TaskBrowser.currentView model.ui) of
+            Just parentId ->
+                { newModel | ui = TaskBrowser.new (TaskBrowser.ItemIdFolder parentId) }
 
-                    _ ->
-                        newModel
-
-            else
+            _ ->
                 newModel
 
-        _ ->
-            newModel
-
-
-getTaskById : List Task.Task -> TaskId.TaskId -> Maybe Task.Task
-getTaskById tasks id =
-    case List.filter (Task.id >> (==) id) tasks of
-        x :: _ ->
-            Just x
-
-        _ ->
-            Nothing
+    else
+        newModel
 
 
 updateRandom : Msg -> Model -> ( Model, Cmd Msg )
@@ -241,80 +225,146 @@ view model =
 
 viewReady : ReadyModel -> Html Msg
 viewReady readyModel =
-    case readyModel.ui of
-        ShowingFolder folderModel ->
-            viewFolderDetails readyModel.folders readyModel.tasks folderModel
+    case TaskBrowser.currentView readyModel.ui of
+        TaskBrowser.ItemIdFolder folderId ->
+            div []
+                [ viewHeader readyModel
+                , viewFolderDetails readyModel.folders readyModel.tasks folderId
+                ]
 
-        ShowingTask taskModel ->
-            viewTaskDetails readyModel.tasks taskModel
+        TaskBrowser.ItemIdTask taskId ->
+            div []
+                [ viewHeader readyModel
+                , viewTaskDetails readyModel.folders readyModel.tasks taskId
+                ]
 
 
-viewFolderDetails : FolderList.FolderList -> List Task.Task -> FolderView.FolderView -> Html Msg
-viewFolderDetails folders tasks model =
+viewModal : TaskBrowser.TaskBrowser -> Html Msg
+viewModal browser =
+    if TaskBrowser.isConfirmDelete browser then
+        [ viewConfirmDelete (TaskBrowser.currentView browser) ]
+
+    else
+        []
+
+
+viewHeader : ReadyModel -> Html Msg
+viewHeader model =
     let
-        currentFolderId =
-            FolderView.currentFolder model
-
-        foldersInDirectory =
-            FolderList.foldersInFolder folders currentFolderId
-
-        tasksInDirectory =
-            FolderList.tasksInFolder tasks currentFolderId
-
-        currentFolder =
-            FolderList.folderWithId folders currentFolderId
+        currentViewId =
+            TaskBrowser.currentView model.ui
 
         parentId =
-            FolderList.getParent folders currentFolderId
+            parentOf model (TaskBrowser.currentView model.ui)
+
+        name =
+            Maybe.withDefault "Missing" <|
+                case currentViewId of
+                    TaskBrowser.ItemIdFolder folderId ->
+                        Maybe.map .name FolderList.folderWithId model.folders folderId
+
+                    TaskBrowser.ItemIdTask taskId ->
+                        Maybe.map .name TaskList.taskWithId model.tasks taskId
     in
-    div []
-        ([ h2 [ class "ui menu attached top" ]
-            ((case parentId of
-                Just pid ->
-                    [ a [ class "item", onClick (SetFolder pid) ] [ text "Back" ] ]
+    [ h2 [ class "ui menu attached top" ]
+        ((case parentId of
+            Just pid ->
+                [ viewBackButton pid ]
 
-                Nothing ->
-                    []
-             )
-                ++ ((case currentFolder of
-                        Just x ->
-                            viewFolderHeader x model
+            Nothing ->
+                []
+         )
+            ++ (viewTitle name currentViewId
+                    :: (case parentId of
+                            Just _ ->
+                                [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDelete ] [ text "Delete" ] ] ]
 
-                        Nothing ->
-                            div [] []
-                    )
-                        :: (case parentId of
-                                Just _ ->
-                                    [ div [ class "right menu" ] [ a [ class "item", onClick ConfirmDeleteFolder ] [ text "Delete" ] ] ]
-
-                                Nothing ->
-                                    []
-                           )
-                   )
-            )
-         , div [ class "ui segment attached" ]
-            [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick (CreateFolder (FolderView.currentFolder model)) ] [ text "Add" ] ]
-            , div [ class "ui cards" ] (List.map (Folder.view SetFolder) foldersInDirectory)
-            ]
-         , div [ class "ui segment attached" ]
-            [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick (CreateTask (FolderView.currentFolder model)) ] [ text "Add" ] ]
-            , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
-            ]
-         ]
-            ++ (if FolderView.isConfirmDelete model then
-                    [ viewConfirmDelete currentFolderId 1 ]
-
-                else
-                    []
+                            Nothing ->
+                                []
+                       )
                )
         )
+    ]
 
 
-viewTaskDetails : List Task.Task -> TaskView -> Html Msg
-viewTaskDetails tasks model =
-    case getTaskById tasks (currentTaskView model) of
+parentOf : ReadyModel -> TaskBrowser.ItemId -> Maybe TaskBrowser.ItemId
+parentOf model id =
+    TaskBrowser.ItemIdFolder <|
+        case id of
+            TaskBrowser.ItemIdFolder folderId ->
+                FolderList.folderWithId model.folders folderId |> Maybe.andThen Folder.parentId
+
+            TaskBrowser.ItemIdTask taskId ->
+                Maybe.map Task.parent (TaskList.taskWithId model.tasks taskId)
+
+
+viewFolderDetails : FolderList.FolderList -> TaskList.TaskList -> FolderId.FolderId -> Html Msg
+viewFolderDetails folders tasks folderId =
+    let
+        foldersInDirectory =
+            FolderList.foldersInFolder folders folderId
+
+        tasksInDirectory =
+            TaskList.tasksInFolder tasks folderId
+
+        currentFolder =
+            FolderList.folderWithId folders folderId
+
+        parentId =
+            FolderList.getParent folders folderId
+    in
+    div [ class "ui segment attached" ]
+        [ div [ class "ui segment attached" ]
+            [ h3 [ class "ui header aligned left" ] [ text "Folders", button [ class "ui button", onClick (CreateFolder folderId) ] [ text "Add" ] ]
+            , div [ class "ui cards" ] (List.map (Folder.view SetView) foldersInDirectory)
+            ]
+        , div [ class "ui segment attached" ]
+            [ h3 [ class "ui header aligned left" ] [ text "Tasks", button [ class "ui button", onClick (CreateTask folderId) ] [ text "Add" ] ]
+            , div [ class "ui cards" ] (List.map viewTask tasksInDirectory)
+            ]
+        ]
+
+
+viewTaskDetails : FolderList.FolderList -> TaskList.TaskList -> TaskView -> Html Msg
+viewTaskDetails folders tasks model =
+    let
+        taskM =
+            TaskList.taskWithId tasks (currentTaskView model)
+
+        parentM =
+            taskM |> Maybe.andThen (Task.parent >> FolderList.folderWithId folders)
+    in
+    case taskM of
         Just task ->
-            div [ class "ui header attached top" ] [ viewBackButton (Task.parent task), text (Task.name task) ]
+            div []
+                [ div [ class "ui menu attached top" ]
+                    [ viewBackButton (Task.parent task)
+                    , div [ class "item" ]
+                        [ text (Task.name task) ]
+                    , div
+                        [ class "right menu" ]
+                        [ a [ class "item", onClick ConfirmDelete ] [ text "Delete" ]
+                        ]
+                    ]
+                , div [ class "ui segment attached" ]
+                    [ div [ class "taskproperty" ]
+                        [ span [ class "propertytitle" ] [ text "Duration: " ]
+                        , span [ class "propertyvalue" ] [ text <| String.fromFloat (Task.duration task) ]
+                        ]
+                    , div [ class "taskproperty" ]
+                        [ span [ class "propertytitle" ] [ text "In Folder: " ]
+                        , span [ class "propertyvalue" ]
+                            [ text <|
+                                case parentM of
+                                    Just parent ->
+                                        Folder.name parent
+
+                                    Nothing ->
+                                        "No Folder"
+                            ]
+                        ]
+                    ]
+                ]
 
         Nothing ->
             div [] [ text "Invalid task" ]
@@ -322,12 +372,12 @@ viewTaskDetails tasks model =
 
 viewBackButton : FolderId.FolderId -> Html Msg
 viewBackButton pid =
-    a [ class "item", onClick (SetFolder pid) ] [ text "Back" ]
+    a [ class "item", onClick (SetView pid) ] [ text "Back" ]
 
 
 viewTask : Task.Task -> Html Msg
 viewTask task =
-    a [ class "card", onClick (OpenTask (Task.id task)) ]
+    a [ class "card", onClick (SetView (Task.id task)) ]
         [ div [ class "content" ]
             [ div [ class "header" ]
                 [ i [ class "icon tasks" ] []
@@ -344,34 +394,34 @@ viewConfirmDelete folderId taskCount =
         , div [ class "content" ] [ text <| "Are you sure you want to delete this folder? It has " ++ String.fromInt taskCount ++ " tasks in it that will get deleted" ]
         , div [ class "actions" ]
             [ div [ class "ui button green", onClick CloseConfirmDelete ] [ text "No" ]
-            , div [ class "ui button red cancel", onClick (DeleteFolder folderId) ] [ text "Yes" ]
+            , div [ class "ui button red cancel", onClick (DeleteItem folderId) ] [ text "Yes" ]
             ]
         ]
 
 
-viewFolderHeader : Folder.Folder -> FolderView.FolderView -> Html Msg
-viewFolderHeader folder folderView =
+viewTitle : String -> TaskBrowser.TaskBrowser -> Html Msg
+viewTitle name browser =
     let
         workingName =
-            FolderView.workingName folderView
+            TaskBrowser.workingName browser
 
-        folderId =
-            FolderView.currentFolder folderView
+        viewId =
+            TaskBrowser.currentView browser
     in
-    if FolderView.isEditingName folderView then
+    if TaskBrowser.isEditingName browser then
         div [ class "item ui input" ]
             [ input
                 [ autofocus True
                 , value workingName
-                , onKeyDown (EditKeyDown folderId workingName)
-                , onInput (ChangeName folderId)
-                , onBlur (SetFolderName folderId workingName)
+                , onKeyDown (EditKeyDown viewId workingName)
+                , onInput (ChangeName viewId)
+                , onBlur (SetName viewId workingName)
                 ]
                 []
             ]
 
     else
-        h2 [ class "item ui header", onClick StartEditFolderName ] [ text <| Folder.name folder ]
+        h2 [ class "item ui header", onClick StartEditName ] [ text name ]
 
 
 subscriptions : Model -> Sub Msg
