@@ -1,46 +1,15 @@
-import React from 'react';
-/* Allows for async functions */
-import ReactDOM from 'react-dom';
-import { createStore, combineReducers, applyMiddleware } from 'redux';
-import { Provider } from 'react-redux';
-import * as reducers from './reducers';
-import { setTime, SET_TIME } from './actions';
-import middleware from './middleware';
-import { createLogger } from 'redux-logger';
-import MainPage from './pages/MainPage'
-import 'semantic-ui-css/semantic.min.css';
-import './css/index.css';
+import Elm from './TodoList.elm';
 
-/*
-let logger = createLogger({
-  predicate: (getState, action) => action.type != SET_TIME,
+var storedData = localStorage.getItem('may-model');
+var storedData = storedData ? JSON.parse(storedData) : {};
+var app = Elm.TodoList.init({
+  node: document.getElementById('elmroot'),
+  flags: storedData
 });
 
-let store = createStore(
-  combineReducers(reducers),
-  applyMiddleware(...middleware, logger)
-);
 
-function updateTime() {
-  store.dispatch(setTime());
-}
-
-let TICK_TIME = 1000;
-
-setInterval(updateTime, TICK_TIME);
-*/
-/* Register our service worker */
-if ('serviceWorker' in navigator) {
-   window.addEventListener('load', () => {
-     navigator.serviceWorker.register('service-worker.js').then(registration => {
-       console.log('SW registered: ', registration);
-     }).catch(registrationError => {
-       console.log('SW registration failed: ', registrationError);
-     });
-   });
- }
-
-ReactDOM.render(
-  <MainPage />,
-  document.getElementById('react-entry')
-);
+// Listen for commands from the `setStorage` port.
+// Turn the data to a string and put it in localStorage.
+app.ports.setLocalStorage.subscribe(function(state) {
+    localStorage.setItem('may-model', JSON.stringify(state));
+});

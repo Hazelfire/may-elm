@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#800080" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
+    <link rel="stylesheet" href="css/index.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+    <script src = "main.js" ></script>
+  <script>
+      if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('sw.js').then(function(registration) {
+        // Registration was successful
+        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      }, function(err) {
+        // registration failed :(
+        console.log('ServiceWorker registration failed: ', err);
+      });
+    });
+  }
+
+  </script>
+    <title>May</title>
+</head>
+<body>
+<div id="elmroot"></div>
+  <script>
+var storedData = localStorage.getItem('may-model');
+var storedData = storedData ? JSON.parse(storedData) : {};
+var app = Elm.TodoList.init({
+  node: document.getElementById('elmroot'),
+  flags: storedData
+});
+
+
+// Listen for commands from the `setStorage` port.
+// Turn the data to a string and put it in localStorage.
+app.ports.setLocalStorage.subscribe(function(state) {
+    localStorage.setItem('may-model', JSON.stringify(state));
+});
+
+app.ports.setFocus.subscribe(function(id) {
+  window.requestAnimationFrame(() => {
+    let element = document.getElementById(id)
+    console.log("setting focus")
+    if(element){
+      console.log("found element")
+      element.focus();
+    }
+  });
+});
+  </script>
+</body>
+</html>

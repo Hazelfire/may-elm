@@ -1,5 +1,7 @@
-module May.Id exposing (Id, generate)
+module May.Id exposing (Id, decode, encode, generate, testId)
 
+import Json.Decode as D
+import Json.Encode as E
 import Random
 
 
@@ -17,3 +19,20 @@ generateId =
 generate : Random.Generator (Id a)
 generate =
     Random.map Id generateId
+
+
+encode : Id a -> E.Value
+encode (Id str) =
+    E.string str
+
+
+decode : D.Decoder (Id a)
+decode =
+    D.map Id D.string
+
+
+{-| Should never be used in production, only exists to create ids purely in tests
+-}
+testId : String -> Id a
+testId s =
+    Id s

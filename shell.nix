@@ -7,5 +7,6 @@ pkgs.mkShell {
     tmuxp
     elmPackages.elm
     elmPackages.elm-format
+    elm2nix
   ];
 }

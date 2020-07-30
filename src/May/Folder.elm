@@ -1,68 +1,44 @@
-module May.Folder exposing
-    ( Folder
-    , generate
-    , generateRoot
-    , id
-    , name
-    , parentId
-    , setName
-    , view
-    )
+module May.Folder exposing (Folder, decode, encode, id, name, new, rename)
 
-import Html exposing (Html, a, div, i, text)
-import Html.Attributes exposing (class)
-import Html.Events exposing (onClick)
-import May.FolderId as FolderId exposing (FolderId)
-import Random
+import Json.Decode as D
+import Json.Encode as E
+import May.Id as Id exposing (Id)
 
 
 type Folder
-    = Folder
-        { id : FolderId
-        , name : String
-        , parent : Maybe FolderId
-        }
+    = Folder (Id Folder) String
 
 
-id : Folder -> FolderId
-id (Folder folder) =
-    folder.id
+new : Id Folder -> String -> Folder
+new newId newName =
+    Folder newId newName
 
 
-parentId : Folder -> Maybe FolderId
-parentId (Folder folder) =
-    folder.parent
-
-
-{-| Views a folder card
--}
-view : (FolderId -> msg) -> Folder -> Html msg
-view clickHandler (Folder model) =
-    a [ class "card", onClick (clickHandler model.id) ]
-        [ div [ class "content" ]
-            [ div [ class "header" ]
-                [ i [ class "icon folder" ] []
-                , text model.name
-                ]
-            ]
-        ]
-
-
-generateRoot : Random.Generator Folder
-generateRoot =
-    Random.map (\newid -> Folder { id = newid, name = "My Tasks", parent = Nothing }) FolderId.generate
-
-
-generate : FolderId.FolderId -> Random.Generator Folder
-generate pid =
-    Random.map (\newid -> Folder { id = newid, name = "New Folder", parent = Just pid }) FolderId.generate
-
-
-setName : String -> Folder -> Folder
-setName newName (Folder folder) =
-    Folder { folder | name = newName }
+id : Folder -> Id Folder
+id (Folder x _) =
+    x
 
 
 name : Folder -> String
-name (Folder folder) =
-    folder.name
+name (Folder _ x) =
+    x
+
+
+rename : String -> Folder -> Folder
+rename newName (Folder oldId _) =
+    Folder oldId newName
+
+
+encode : Folder -> E.Value
+encode folder =
+    E.object
+        [ ( "id", Id.encode (id folder) )
+        , ( "name", E.string (name folder) )
+        ]
+
+
+decode : D.Decoder Folder
+decode =
+    D.map2 Folder
+        (D.field "id" Id.decode)
+        (D.field "name" D.string)

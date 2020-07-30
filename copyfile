@@ -1,0 +1,75 @@
+
+updateReady : Msg -> ReadyModel -> ( ReadyModel, Cmd Msg )
+updateReady message model =
+    case message of
+        CreateFolder parentId ->
+            ( model, Random.generate (NewFolder parentId) Id.generate )
+
+        NewFolder parentId id ->
+            pure <| { model | fs = FileSystem.addFolder parentId (Folder.new id "New Folder") model.fs }
+
+        CreateTask parentId ->
+            ( model, Random.generate (NewTask parentId) Id.generate )
+
+        NewTask parentId taskId ->
+            pure <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
+
+        SetTime time ->
+            pure <| { model | currentTime = Just time }
+
+        SetView vid ->
+            case vid of
+                ViewIdFolder fid ->
+                    pure <| { model | viewing = newFolderView fid }
+
+                ViewIdTask tid ->
+                    pure <| { model | viewing = newTaskView tid }
+
+        StartEditingFolderName ->
+            withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName "")))) model
+
+        StartEditingTaskName ->
+            withCommand (always (setFocus "taskname")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName "")))) model
+
+        SetFolderName fid name ->
+            let
+                fsChange =
+                    mapFileSystem (FileSystem.mapOnFolder fid (Folder.rename name)) model
+            in
+            saveToLocalStorage <| mapViewing (mapFolderView (mapFolderEditing (always NotEditingFolder))) fsChange
+
+        SetTaskName tid name ->
+            let
+                fsChange =
+                    mapFileSystem (FileSystem.mapOnTask tid (Task.rename name)) model
+            in
+            saveToLocalStorage <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+
+        StartEditingTaskDuration ->
+            withCommand (always (setFocus "taskduration")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskDuration "")))) model
+
+        ChangeTaskName newName ->
+            pure <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName newName)))) model
+
+        ChangeTaskDuration newDuration ->
+            pure <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskDuration newDuration)))) model
+
+        ChangeFolderName newName ->
+            pure <| mapViewing (mapFolderView (\x -> { x | editing = EditingFolderName newName })) model
+
+        SetTaskDuration tid duration ->
+            let
+                fsChange =
+                    mapFileSystem (FileSystem.mapOnTask tid (Task.setDuration duration)) model
+            in
+            saveToLocalStorage <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+
+        SetTaskDue tid due ->
+            saveToLocalStorage <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
+
+        SetTaskDueNow tid ->
+            ( model, Time.now |> Task.perform (addWeek >> Just >> SetTaskDue tid) )
+
+        _ ->
+            pure model
+
