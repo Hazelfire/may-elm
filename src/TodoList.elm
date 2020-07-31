@@ -386,24 +386,78 @@ viewTodo nowM tasks =
     case nowM of
         Just now ->
             let
-                urgencyTasks =
-                    List.map (\x -> ( x, Statistics.taskUrgency now x )) tasks
+                labeledTasks =
+                    Statistics.labelTasks now tasks
 
-                sortedTasks =
-                    List.sortBy (Tuple.second >> negate) urgencyTasks
+                addDurations =
+                    List.map (\x -> ( x, Just (Task.duration x) ))
+
+                addNothing =
+                    List.map (\x -> ( x, Nothing ))
+
+                mapJustSecond =
+                    List.map (\( x, a ) -> ( x, Just a ))
+
+                sections =
+                    if List.length labeledTasks.overdue > 0 then
+                        [ viewTodoSection "Overdue" (addDurations labeledTasks.overdue) ]
+
+                    else
+                        []
+
+                sectionsToday =
+                    if List.length labeledTasks.doToday > 0 then
+                        viewTodoSection "Do Today" (addDurations labeledTasks.doToday) :: sections
+
+                    else
+                        sections
+
+                sectionsSoon =
+                    if List.length labeledTasks.doSoon > 0 then
+                        viewTodoSection "Do Soon" (mapJustSecond labeledTasks.doSoon) :: sectionsToday
+
+                    else
+                        sectionsToday
+
+                allSections =
+                    if List.length labeledTasks.doLater > 0 then
+                        viewTodoSection "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
+
+                    else
+                        sectionsSoon
             in
             div [ class "todo" ]
-                (List.map
-                    (\( task, urgency ) ->
-                        div [ class "todoitem" ]
-                            [ a [ onClick (SetView (ViewIdTask (Task.id task))) ] [ text <| showFloat urgency ++ ": " ++ Task.name task ]
-                            ]
-                    )
-                    sortedTasks
-                )
+                (List.reverse allSections)
 
         Nothing ->
             div [] [ text "loading" ]
+
+
+viewTodoSection : String -> List ( Task, Maybe Float ) -> Html Msg
+viewTodoSection title tasks =
+    let
+        sortedTasks =
+            List.sortBy (\( _, a ) -> -(Maybe.withDefault 0 a)) tasks
+    in
+    div []
+        (h3 [ class "ui header" ] [ text title ]
+            :: List.map
+                (\( task, urgency ) ->
+                    let
+                        label =
+                            case urgency of
+                                Just u ->
+                                    showFloat u ++ ": "
+
+                                Nothing ->
+                                    ""
+                    in
+                    div [ class "todoitem" ]
+                        [ a [ onClick (SetView (ViewIdTask (Task.id task))) ] [ text <| label ++ Task.name task ]
+                        ]
+                )
+                sortedTasks
+        )
 
 
 showFloat : Float -> String
@@ -416,9 +470,14 @@ showFloat float =
             base // 100
 
         afterDecimal =
-            modBy 100 base
+            String.padLeft 2 '0' (String.fromInt (modBy 100 base))
     in
-    String.fromInt beforeDecimal ++ "." ++ String.fromInt afterDecimal
+    String.fromInt beforeDecimal ++ "." ++ afterDecimal
+
+
+tomorrow : Time.Posix -> Time.Posix
+tomorrow time =
+    Time.millisToPosix (Time.posixToMillis time + 60 * 60 * 1000 * 24)
 
 
 viewStatistics : Maybe Time.Posix -> List Task -> Html Msg
@@ -427,8 +486,7 @@ viewStatistics nowM tasks =
         Just now ->
             div [ class "ui statistics" ]
                 [ viewStatistic "Urgency" (showFloat <| Statistics.urgency now tasks)
-                , viewStatistic "Velocity" (showFloat <| Statistics.velocity now tasks)
-                , viewStatistic "Bait" (showFloat <| Statistics.bait now tasks)
+                , viewStatistic "Tomorrow" (showFloat <| Statistics.urgency (tomorrow now) tasks)
                 ]
 
         Nothing ->
@@ -499,7 +557,7 @@ viewFolderDetails folderView fs =
                  )
                     ++ [ div [ class "ui header attached top" ]
                             [ viewBackButton (FileSystem.folderParent folderId fs)
-                            , editableField editingName "foldername" nameText StartEditingFolderName ChangeFolderName (restrictMessage (always True) (SetFolderName folderId))
+                            , editableField editingName "foldername" nameText StartEditingFolderName ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
                             , viewButton "Delete" ConfirmDeleteFolder
                             ]
                        , div [ class "ui segment attached" ]
@@ -593,7 +651,7 @@ viewTaskDetails taskView fs =
                  )
                     ++ [ div [ class "ui header attached top" ]
                             [ viewBackButton (FileSystem.taskParent taskId fs)
-                            , editableField editingName "taskname" nameText StartEditingTaskName ChangeTaskName (restrictMessage (always True) (SetTaskName taskId))
+                            , editableField editingName "taskname" nameText StartEditingTaskName ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
                             , viewButton "Delete" ConfirmDeleteTask
                             ]
                        , div [ class "ui segment attached" ]

@@ -1,4 +1,5 @@
 build
+result
 node_modules/
 dist
 elm-stuff
