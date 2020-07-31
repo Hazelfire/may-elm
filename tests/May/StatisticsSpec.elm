@@ -67,6 +67,23 @@ suite =
                             Statistics.urgency (Time.millisToPosix 0) [ task, task2 ]
                     in
                     expectFloatEqual urgency 1.0
+            , test "urgency can overflows" <|
+                \_ ->
+                    let
+                        task =
+                            Task.new (Id.testId "task") "New Task"
+                                |> Task.setDue (Just (Time.millisToPosix (daysToMilis 1)))
+                                |> Task.setDuration 1
+
+                        task2 =
+                            Task.new (Id.testId "task2") "New Task2"
+                                |> Task.setDue (Just (Time.millisToPosix (daysToMilis 2)))
+                                |> Task.setDuration 2
+
+                        urgency =
+                            Statistics.urgency (Time.millisToPosix 0) [ task, task2 ]
+                    in
+                    expectFloatEqual urgency 1.5
             ]
         , describe "Task Labels"
             [ test "sole task is in doSoon" <|
@@ -98,5 +115,22 @@ suite =
                             Statistics.labelTasks (Time.millisToPosix 0) [ task, task2 ]
                     in
                     Expect.equal ( 1, 1 ) ( List.length labels.doSoon, List.length labels.doLater )
+            , test "labels overflow" <|
+                \_ ->
+                    let
+                        task =
+                            Task.new (Id.testId "task") "New Task"
+                                |> Task.setDue (Just (Time.millisToPosix (daysToMilis 2)))
+                                |> Task.setDuration 2
+
+                        task2 =
+                            Task.new (Id.testId "task2") "New Task2"
+                                |> Task.setDue (Just (Time.millisToPosix (daysToMilis 4)))
+                                |> Task.setDuration 4
+
+                        labels =
+                            Statistics.labelTasks (Time.millisToPosix 0) [ task, task2 ]
+                    in
+                    Expect.equal [ ( task, 1.0 ), ( task2, 0.5 ) ] labels.doSoon
             ]
         ]

@@ -99,7 +99,7 @@ labelTasks_ now last_due residual currentUrgency tasks =
                     else
                         let
                             addedResidual =
-                                toFloat (Time.posixToMillis dueDate - Time.posixToMillis last_due) / 1000 / 60 / 60 * currentUrgency + residual
+                                toFloat (Time.posixToMillis dueDate - Time.posixToMillis last_due) / 1000 / 60 / 60 / 24 * currentUrgency + residual
                         in
                         if addedResidual >= Task.duration task then
                             let
