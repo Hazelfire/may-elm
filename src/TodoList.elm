@@ -16,8 +16,8 @@ port module TodoList exposing
 
 import Browser
 import Date
-import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, nav, p, span, text)
-import Html.Attributes exposing (checked, class, id, type_, value)
+import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
 import Http
 import Iso8601
@@ -507,28 +507,42 @@ view model =
 
 viewHeader : Model -> Html Msg
 viewHeader model =
-    nav [ class "navbar" ]
-        [ case model.authState of
-            Unauthenticated ->
-                text "Offline"
+    let
+        authStatus =
+            case model.authState of
+                Unauthenticated ->
+                    "Offline"
 
-            Authenticating _ ->
-                text "Authenticating..."
+                Authenticating _ ->
+                    "Authenticating..."
 
-            CheckingSubscription _ ->
-                text "Checking Subscription"
+                CheckingSubscription _ ->
+                    "Checking Subscription"
 
-            AuthFailed ->
-                text "Auth Failed"
+                AuthFailed ->
+                    "Auth Failed"
 
-            Authenticated ->
-                text "Authenticated"
+                Authenticated ->
+                    "Authenticated"
 
-            SubscriptionNeeded _ ->
-                button [ onClick RequestSubscription ] [ text "Get a subscription" ]
+                SubscriptionNeeded _ ->
+                    "Get a Subscription"
 
-            SubscriptionRequested ->
-                text "Forwarding you to payment"
+                SubscriptionRequested ->
+                    "Forwarding you to payment"
+    in
+    nav [ class "ui menu" ]
+        [ a [ class "item" ] [ text "May" ]
+        , ul [ class "right menu" ]
+            [ li [ class "item" ] [ text authStatus ]
+            , li [ class "item" ]
+                [ a
+                    [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code"
+                    , class "ui button"
+                    ]
+                    [ text "Login" ]
+                ]
+            ]
         ]
 
 
