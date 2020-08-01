@@ -1,4 +1,4 @@
-module May.Id exposing (Id, decode, encode, generate, testId)
+module May.Id exposing (Id, decode, encode, generate, rootId, testId)
 
 import Json.Decode as D
 import Json.Encode as E
@@ -36,3 +36,8 @@ decode =
 testId : String -> Id a
 testId s =
     Id s
+
+
+rootId : Id a
+rootId =
+    Id "root"

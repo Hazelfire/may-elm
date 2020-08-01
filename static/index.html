@@ -9,15 +9,14 @@
     <link rel="stylesheet" href="css/index.css" />
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
     <script src = "main.js" ></script>
+    <script src="https://js.stripe.com/v3/"></script>
   <script>
       if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('sw.js').then(function(registration) {
-        // Registration was successful
-        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        // Success in registration
       }, function(err) {
-        // registration failed :(
-        console.log('ServiceWorker registration failed: ', err);
+        // Fail in registration
       });
     });
   }
@@ -28,30 +27,61 @@
 <body>
 <div id="elmroot"></div>
   <script>
-var storedData = localStorage.getItem('may-model');
-var storedData = storedData ? JSON.parse(storedData) : {};
-var app = Elm.TodoList.init({
-  node: document.getElementById('elmroot'),
-  flags: storedData
-});
-
-
-// Listen for commands from the `setStorage` port.
-// Turn the data to a string and put it in localStorage.
-app.ports.setLocalStorage.subscribe(function(state) {
-    localStorage.setItem('may-model', JSON.stringify(state));
-});
-
-app.ports.setFocus.subscribe(function(id) {
-  window.requestAnimationFrame(() => {
-    let element = document.getElementById(id)
-    console.log("setting focus")
-    if(element){
-      console.log("found element")
-      element.focus();
-    }
+const params = new URLSearchParams(window.location.search)
+if(params.has('code')){
+  // We just came back from an authentication, I'll include the code within
+  // the model. We store the code within local storage then make the code disappear!
+  // It looks ugly in the URL so bye bye!
+  
+  localStorage.setItem('may-auth-code', params.get('code'));
+  window.location.replace("/");
+}
+else{
+  var storedData = localStorage.getItem('may-model');
+  var storedData = storedData ? JSON.parse(storedData) : {};
+  let code = localStorage.getItem('may-auth-code');
+  if(code){
+    // Hey! We just came back from an authentication request. Let's pass the code
+    // along with the model and remove the code from local storage (we don't need it anymore)
+    // We are going to exchange this for an actual token later
+    storedData.code = code;
+    localStorage.removeItem('may-auth-code');
+  }
+  var app = Elm.TodoList.init({
+    node: document.getElementById('elmroot'),
+    flags: storedData
   });
-});
+
+
+  // Listen for commands from the `setLocalStorage` port.
+  // Turn the data to a string and put it in localStorage.
+  app.ports.setLocalStorage.subscribe(function(state) {
+      localStorage.setItem('may-model', JSON.stringify(state));
+  });
+
+  app.ports.openStripe.subscribe(function(sessionId) {
+    var stripe = Stripe('pk_test_218Wbt0Tcdvhoy44q2rBg3bw');
+    stripe.redirectToCheckout({
+      // Make the id field from the Checkout Session creation API response
+      // available to this file, so you can provide it as argument here
+      // instead of the {{CHECKOUT_SESSION_ID}} placeholder.
+      sessionId
+    }).then(function (result) {
+      console.log(result);
+      // If `redirectToCheckout` fails due to a browser or network
+      // error, display the localized error message to your customer
+      // using `result.error.message`.
+    });
+  });
+  app.ports.setFocus.subscribe(function(id) {
+    window.requestAnimationFrame(() => {
+      let element = document.getElementById(id)
+      if(element){
+        element.focus();
+      }
+    });
+  });
+}
   </script>
 </body>
 </html>

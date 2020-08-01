@@ -1,6 +1,7 @@
 port module TodoList exposing
-    ( FolderEditing(..)
-    , Model(..)
+    ( AuthState(..)
+    , FolderEditing(..)
+    , Model
     , Msg(..)
     , TaskEditing(..)
     , ViewId(..)
@@ -10,13 +11,17 @@ port module TodoList exposing
     , update
     )
 
+{-| Main module. Contains main method for the application
+-}
+
 import Browser
 import Date
-import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, p, span, text)
+import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, nav, p, span, text)
 import Html.Attributes exposing (checked, class, id, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
+import Http
 import Iso8601
-import Json.Decode as Json
+import Json.Decode as D
 import Json.Encode as E
 import May.FileSystem as FileSystem exposing (FileSystem)
 import May.Folder as Folder exposing (Folder)
@@ -28,21 +33,27 @@ import Task
 import Time
 
 
-type Model
-    = Loading
-    | Ready ReadyModel
+type alias Model =
+    { fs : FileSystem
+    , viewing : ViewType
+    , currentTime : Maybe Time.Posix
+    , authState : AuthState
+    }
+
+
+type AuthState
+    = Unauthenticated
+    | Authenticating String
+    | CheckingSubscription AuthResponse
+    | AuthFailed
+    | Authenticated
+    | SubscriptionNeeded AuthResponse
+    | SubscriptionRequested
 
 
 type ViewId
     = ViewIdFolder (Id Folder)
     | ViewIdTask (Id Task)
-
-
-type alias ReadyModel =
-    { fs : FileSystem
-    , viewing : ViewType
-    , currentTime : Maybe Time.Posix
-    }
 
 
 type ViewType
@@ -86,12 +97,15 @@ newTaskView id =
 
 
 type Msg
-    = NewFS (Id Folder)
-    | CreateFolder (Id Folder)
+    = CreateFolder (Id Folder)
+    | GotAuthResponse (Result Http.Error AuthResponse)
+    | GotSubscriptionCheck (Result Http.Error Bool)
+    | GotSubscriptionSessionId (Result Http.Error String)
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
     | StartEditingTaskName
+    | RequestSubscription
     | StartEditingFolderName
     | StartEditingTaskDuration
     | ChangeFolderName String
@@ -123,51 +137,100 @@ main =
         }
 
 
+authCodeDecoder : D.Decoder String
+authCodeDecoder =
+    D.field "code" D.string
+
+
 {-| Initialises from storage modal
 -}
 init : E.Value -> ( Model, Cmd Msg )
 init flags =
-    case Json.decodeValue FileSystem.decode flags of
-        Ok fs ->
-            ( Ready
-                { fs = fs
-                , viewing = ViewTypeFolder { id = FileSystem.getRootId fs, editing = NotEditingFolder }
-                , currentTime = Nothing
-                }
-            , Time.now |> Task.perform SetTime
-            )
+    let
+        authState =
+            case D.decodeValue authCodeDecoder flags of
+                Ok code ->
+                    Authenticating code
 
-        Err _ ->
-            ( Loading, Random.generate NewFS Id.generate )
+                Err _ ->
+                    Unauthenticated
+
+        initModel =
+            case D.decodeValue FileSystem.decode flags of
+                Ok fs ->
+                    { fs = fs
+                    , viewing = ViewTypeFolder { id = FileSystem.getRootId fs, editing = NotEditingFolder }
+                    , currentTime = Nothing
+                    , authState = authState
+                    }
+
+                Err _ ->
+                    let
+                        rootId =
+                            Id.rootId
+                    in
+                    { fs = FileSystem.new (Folder.new rootId "My Tasks")
+                    , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder }
+                    , currentTime = Nothing
+                    , authState = authState
+                    }
+    in
+    case authState of
+        Authenticating authCode ->
+            ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, exchangeAuthCode authCode ] )
+
+        _ ->
+            ( initModel, Time.now |> Task.perform SetTime )
+
+
+authBase : String
+authBase =
+    "https://auth.may.hazelfire.net"
+
+
+clientId : String
+clientId =
+    "1qu0jlg90401pc5lf41jukbd15"
+
+
+type alias AuthResponse =
+    { idToken : String
+    , accessToken : String
+    , refreshToken : String
+    , expiresIn : Int
+    }
+
+
+tokenResponseDecoder : D.Decoder AuthResponse
+tokenResponseDecoder =
+    D.map4 AuthResponse
+        (D.field "id_token" D.string)
+        (D.field "access_token" D.string)
+        (D.field "refresh_token" D.string)
+        (D.field "expires_in" D.int)
+
+
+exchangeAuthCode : String -> Cmd Msg
+exchangeAuthCode authCode =
+    Http.request
+        { url = authBase ++ "/oauth2/token"
+        , method = "POST"
+        , body = Http.stringBody "application/x-www-form-urlencoded" (exchangeAuthCodeBody authCode)
+        , headers = []
+        , timeout = Nothing
+        , tracker = Nothing
+        , expect = Http.expectJson GotAuthResponse tokenResponseDecoder
+        }
+
+
+exchangeAuthCodeBody : String -> String
+exchangeAuthCodeBody code =
+    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=https://may.hazelfire.net/&code=" ++ code
 
 
 pure : a -> ( a, Cmd msg )
 pure model =
     ( model, Cmd.none )
-
-
-update : Msg -> Model -> ( Model, Cmd Msg )
-update message model =
-    case model of
-        Loading ->
-            case message of
-                NewFS rootId ->
-                    pure <|
-                        Ready
-                            { fs = FileSystem.new (Folder.new rootId "My Tasks")
-                            , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder }
-                            , currentTime = Nothing
-                            }
-
-                _ ->
-                    pure model
-
-        Ready readyModel ->
-            let
-                ( newModel, command ) =
-                    updateReady message readyModel
-            in
-            ( Ready newModel, command )
 
 
 port setLocalStorage : E.Value -> Cmd msg
@@ -176,8 +239,11 @@ port setLocalStorage : E.Value -> Cmd msg
 port setFocus : String -> Cmd msg
 
 
-updateReady : Msg -> ReadyModel -> ( ReadyModel, Cmd Msg )
-updateReady message model =
+port openStripe : String -> Cmd msg
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update message model =
     case message of
         CreateFolder parentId ->
             ( model, Random.generate (NewFolder parentId) Id.generate )
@@ -291,11 +357,76 @@ updateReady message model =
                 _ ->
                     pure model
 
-        _ ->
+        GotAuthResponse (Err _) ->
+            pure <| { model | authState = AuthFailed }
+
+        GotAuthResponse (Ok response) ->
+            ( { model | authState = CheckingSubscription response }, checkSubscription response )
+
+        GotSubscriptionCheck (Err _) ->
+            pure <| { model | authState = AuthFailed }
+
+        GotSubscriptionCheck (Ok False) ->
+            case model.authState of
+                CheckingSubscription authResponse ->
+                    pure <| { model | authState = SubscriptionNeeded authResponse }
+
+                _ ->
+                    pure model
+
+        GotSubscriptionCheck (Ok True) ->
+            pure <| { model | authState = Authenticated }
+
+        RequestSubscription ->
+            case model.authState of
+                SubscriptionNeeded authResponse ->
+                    ( model, requestSubscription authResponse )
+
+                _ ->
+                    pure model
+
+        GotSubscriptionSessionId (Ok sessionId) ->
+            ( model, openStripe sessionId )
+
+        GotSubscriptionSessionId (Err _) ->
+            pure <| { model | authState = AuthFailed }
+
+        NoOp ->
             pure model
 
 
-saveToLocalStorage : ReadyModel -> ( ReadyModel, Cmd msg )
+backendBase : String
+backendBase =
+    "https://api.may.hazelfire.net"
+
+
+requestSubscription : AuthResponse -> Cmd Msg
+requestSubscription response =
+    Http.request
+        { url = backendBase ++ "/subscription_session"
+        , method = "GET"
+        , body = Http.emptyBody
+        , headers = [ Http.header "Authorization" response.idToken ]
+        , timeout = Nothing
+        , tracker = Nothing
+        , expect = Http.expectJson GotSubscriptionSessionId D.string
+        }
+
+
+checkSubscription : AuthResponse -> Cmd Msg
+checkSubscription response =
+    Http.request
+        { url = backendBase ++ "/subscription"
+        , method = "GET"
+        , body = Http.emptyBody
+        , headers = [ Http.header "Authorization" response.idToken ]
+        , timeout = Nothing
+        , tracker = Nothing
+        , expect = Http.expectJson GotSubscriptionCheck D.bool
+        }
+
+
+saveToLocalStorage : Model -> ( Model, Cmd msg )
 saveToLocalStorage =
     withCommand (\model -> setLocalStorage (FileSystem.encode model.fs))
 
@@ -310,7 +441,7 @@ addWeek time =
     Time.millisToPosix <| Time.posixToMillis time + (1000 * 60 * 60 * 24 * 7)
 
 
-mapViewing : (ViewType -> ViewType) -> ReadyModel -> ReadyModel
+mapViewing : (ViewType -> ViewType) -> Model -> Model
 mapViewing func model =
     { model | viewing = func model.viewing }
 
@@ -325,7 +456,7 @@ mapFolderEditing func model =
     { model | editing = func model.editing }
 
 
-mapFileSystem : (FileSystem -> FileSystem) -> ReadyModel -> ReadyModel
+mapFileSystem : (FileSystem -> FileSystem) -> Model -> Model
 mapFileSystem func model =
     { model | fs = func model.fs }
 
@@ -352,32 +483,52 @@ mapFolderView func model =
 
 view : Model -> Html Msg
 view model =
-    case model of
-        Loading ->
-            div [] [ text "loading" ]
-
-        Ready readyModel ->
-            viewReady readyModel
-
-
-viewReady : ReadyModel -> Html Msg
-viewReady readyModel =
     let
         itemView =
-            case readyModel.viewing of
+            case model.viewing of
                 ViewTypeFolder folderView ->
-                    viewFolderDetails folderView readyModel.fs
+                    viewFolderDetails folderView model.fs
 
                 ViewTypeTask taskView ->
-                    viewTaskDetails taskView readyModel.fs
+                    viewTaskDetails taskView model.fs
     in
-    div [ class "ui divided stackable grid" ]
-        [ div
-            [ class "twelve wide column" ]
-            [ viewStatistics readyModel.currentTime (FileSystem.allTasks readyModel.fs)
-            , itemView
+    div []
+        [ viewHeader model
+        , div [ class "ui divided stackable grid" ]
+            [ div
+                [ class "twelve wide column" ]
+                [ viewStatistics model.currentTime (FileSystem.allTasks model.fs)
+                , itemView
+                ]
+            , div [ class "four wide column" ] [ viewTodo model.currentTime (FileSystem.allTasks model.fs) ]
             ]
-        , div [ class "four wide column" ] [ viewTodo readyModel.currentTime (FileSystem.allTasks readyModel.fs) ]
+        ]
+
+
+viewHeader : Model -> Html Msg
+viewHeader model =
+    nav [ class "navbar" ]
+        [ case model.authState of
+            Unauthenticated ->
+                text "Offline"
+
+            Authenticating _ ->
+                text "Authenticating..."
+
+            CheckingSubscription _ ->
+                text "Checking Subscription"
+
+            AuthFailed ->
+                text "Auth Failed"
+
+            Authenticated ->
+                text "Authenticated"
+
+            SubscriptionNeeded _ ->
+                button [ onClick RequestSubscription ] [ text "Get a subscription" ]
+
+            SubscriptionRequested ->
+                text "Forwarding you to payment"
         ]
 
 
@@ -723,7 +874,7 @@ restrictMessage cond msgFunc input =
 
 onEnter : Msg -> Attribute Msg
 onEnter message =
-    on "keydown" (Json.map (restrictMessage ((==) 13) (always message)) keyCode)
+    on "keydown" (D.map (restrictMessage ((==) 13) (always message)) keyCode)
 
 
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg

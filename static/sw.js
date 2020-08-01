@@ -24,9 +24,11 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request, {ignoreSearch: true}).then(response => {
-      return response || fetch(event.request);
-    }),
-  );
+  if(event.request.method == 'GET'){
+    event.respondWith(
+      caches.match(event.request, {ignoreSearch: true}).then(response => {
+        return response || fetch(event.request);
+      }),
+    );
+  };
 });
