@@ -558,7 +558,49 @@ nodeDecoder =
 
 updateFS : FSUpdate -> FileSystem -> FileSystem
 updateFS (FSUpdate update) (FileSystem fs) =
-    FileSystem { fs | nodes = update ++ fs.nodes }
+    FileSystem { fs | nodes = applySyncList fs.syncList update }
+
+
+{-| Applies the sync list to the remote locally. Ensuring that the current state
+is remote + local changes
+-}
+applySyncList : SyncList -> List Node -> List Node
+applySyncList sl remote =
+    let
+        filterIdOut =
+            \nodeId ->
+                List.filter
+                    (\y ->
+                        case ( y, nodeId ) of
+                            ( FolderNode info, SyncList.SyncFolderId folderId ) ->
+                                Folder.id info.folder /= folderId
+
+                            ( TaskNode info, SyncList.SyncTaskId taskId ) ->
+                                Task.id info.task /= taskId
+
+                            _ ->
+                                True
+                    )
+                    remote
+    in
+    case sl of
+        [] ->
+            remote
+
+        x :: rest ->
+            let
+                currentApply =
+                    case x of
+                        SyncList.SyncUpdate (SyncList.SyncUpdateFolder parent folder) ->
+                            FolderNode (FolderInfo parent folder) :: filterIdOut (SyncList.SyncFolderId (Folder.id folder))
+
+                        SyncList.SyncUpdate (SyncList.SyncUpdateTask parent task) ->
+                            TaskNode (TaskInfo parent task) :: filterIdOut (SyncList.SyncTaskId (Task.id task))
+
+                        SyncList.SyncDelete id ->
+                            filterIdOut id
+            in
+            applySyncList rest currentApply
 
 
 needsSync : FileSystem -> Bool

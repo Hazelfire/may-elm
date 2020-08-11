@@ -1,4 +1,15 @@
-module May.SyncList exposing (SyncList, SyncNodeId(..), SyncUpdateNode(..), addNode, decode, deleteNode, empty, encode, needsSync)
+module May.SyncList exposing
+    ( SyncAction(..)
+    , SyncList
+    , SyncNodeId(..)
+    , SyncUpdateNode(..)
+    , addNode
+    , decode
+    , deleteNode
+    , empty
+    , encode
+    , needsSync
+    )
 
 {-| The SyncList keeps track of all the changes that have been made that have
 not yet been sent to the server.
@@ -130,7 +141,7 @@ syncActionId action =
 
 filterOutId : SyncNodeId -> SyncList -> SyncList
 filterOutId id list =
-    List.filter (syncActionId >> (==) id) list
+    List.filter (syncActionId >> (/=) id) list
 
 
 addNode : SyncUpdateNode -> SyncList -> SyncList
