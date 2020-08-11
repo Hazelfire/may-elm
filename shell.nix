@@ -7,6 +7,7 @@ pkgs.mkShell {
     tmuxp
     elmPackages.elm
     elmPackages.elm-format
+    chromium
     elm2nix
   ];
 }

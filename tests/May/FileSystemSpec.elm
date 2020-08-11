@@ -2,11 +2,19 @@ module May.FileSystemSpec exposing (..)
 
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
+import Json.Decode as D
+import Json.Encode as E
 import May.FileSystem as FileSystem
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
-import May.Task as Task
+import May.SyncList as SyncList
+import May.Task as Task exposing (Task)
 import Test exposing (..)
+
+
+emptyList : E.Value
+emptyList =
+    E.list (\x -> x) []
 
 
 rootId : Id Folder
@@ -24,61 +32,85 @@ initFS =
     FileSystem.new root
 
 
+task : String -> Task
+task name =
+    let
+        taskId =
+            Id.testId name
+
+        newTask =
+            Task.new taskId name
+    in
+    newTask
+
+
 suite : Test
 suite =
     describe "FileSystem"
-        [ test "adding tasks doesn't delete root" <|
-            \_ ->
-                let
-                    taskId =
-                        Id.testId "child"
+        [ describe "Adding Nodes"
+            [ test "adding tasks doesn't delete root" <|
+                \_ ->
+                    let
+                        newFS =
+                            FileSystem.addTask rootId (task "newTask") initFS
 
-                    newTask =
-                        Task.new taskId "New Task"
+                        allFolders =
+                            FileSystem.allFolders newFS
+                    in
+                    Expect.equal allFolders [ root ]
+            ]
+        , describe "Deleting Nodes" <|
+            [ test "deletes tasks" <|
+                \_ ->
+                    let
+                        taskId =
+                            Id.testId "child"
 
-                    newFS =
-                        FileSystem.addTask rootId newTask initFS
+                        newTask =
+                            Task.new taskId "New Task"
 
-                    allFolders =
-                        FileSystem.allFolders newFS
-                in
-                Expect.equal allFolders [ root ]
-        , test "deletes tasks" <|
-            \_ ->
-                let
-                    taskId =
-                        Id.testId "child"
+                        newFS =
+                            FileSystem.addTask rootId newTask initFS
 
-                    newTask =
-                        Task.new taskId "New Task"
+                        newFS2 =
+                            FileSystem.deleteTask taskId newFS
 
-                    newFS =
-                        FileSystem.addTask rootId newTask initFS
+                        retrievedTasks =
+                            FileSystem.tasksInFolder rootId newFS2
+                    in
+                    Expect.equal retrievedTasks []
+            , test "deletes folders" <|
+                \_ ->
+                    let
+                        folderId =
+                            Id.testId "child"
 
-                    newFS2 =
-                        FileSystem.deleteTask taskId newFS
+                        newFolder =
+                            Folder.new folderId "New Folder"
 
-                    retrievedTasks =
-                        FileSystem.tasksInFolder rootId newFS2
-                in
-                Expect.equal retrievedTasks []
-        , test "deletes folders" <|
-            \_ ->
-                let
-                    folderId =
-                        Id.testId "child"
+                        newFS =
+                            FileSystem.addFolder rootId newFolder initFS
 
-                    newFolder =
-                        Folder.new folderId "New Folder"
+                        newFS2 =
+                            FileSystem.deleteFolder folderId newFS
 
-                    newFS =
-                        FileSystem.addFolder rootId newFolder initFS
+                        retrievedFolders =
+                            FileSystem.foldersInFolder rootId newFS2
+                    in
+                    Expect.equal retrievedFolders []
+            ]
+        , describe "Serialisation"
+            [ test "decoding a filesystem with an empty synclist doesn't need syncing" <|
+                \_ ->
+                    let
+                        fileSystemValue =
+                            E.object [ ( "tasks", emptyList ), ( "folders", E.list Folder.encode [ root ] ), ( "edges", emptyList ), ( "root", E.string "root" ), ( "synclist", SyncList.encode SyncList.empty ) ]
+                    in
+                    case D.decodeValue FileSystem.decode fileSystemValue of
+                        Ok fs ->
+                            Expect.equal False (FileSystem.needsSync fs)
 
-                    newFS2 =
-                        FileSystem.deleteFolder folderId newFS
-
-                    retrievedFolders =
-                        FileSystem.foldersInFolder rootId newFS2
-                in
-                Expect.equal retrievedFolders []
+                        Err _ ->
+                            Expect.fail "Expected to be able to decode the filesystem"
+            ]
         ]

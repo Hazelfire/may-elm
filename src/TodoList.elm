@@ -1,8 +1,8 @@
 port module TodoList exposing
-    ( AuthState(..)
-    , FolderEditing(..)
+    ( FolderEditing(..)
     , Model
     , Msg(..)
+    , SyncStatus(..)
     , TaskEditing(..)
     , ViewId(..)
     , ViewType(..)
@@ -23,10 +23,12 @@ import Http
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
+import May.Auth as Auth
 import May.FileSystem as FileSystem exposing (FileSystem)
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
 import May.Statistics as Statistics
+import May.SyncList as SyncList exposing (SyncList)
 import May.Task as Task exposing (Task)
 import Random
 import Task
@@ -37,18 +39,18 @@ type alias Model =
     { fs : FileSystem
     , viewing : ViewType
     , currentTime : Maybe Time.Posix
-    , authState : AuthState
+    , authState : Auth.AuthState
+    , syncStatus : SyncStatus
     }
 
 
-type AuthState
-    = Unauthenticated
-    | Authenticating String
-    | CheckingSubscription AuthResponse
-    | AuthFailed
-    | Authenticated
-    | SubscriptionNeeded AuthResponse
-    | SubscriptionRequested
+type SyncStatus
+    = SyncOffline
+    | Synced
+    | Retreiving
+    | RetreiveFailed
+    | Updating
+    | UpdateFailed
 
 
 type ViewId
@@ -98,9 +100,11 @@ newTaskView id =
 
 type Msg
     = CreateFolder (Id Folder)
-    | GotAuthResponse (Result Http.Error AuthResponse)
+    | GotAuthResponse (Result Http.Error Auth.AuthTokens)
     | GotSubscriptionCheck (Result Http.Error Bool)
     | GotSubscriptionSessionId (Result Http.Error String)
+    | GotNodes (Result Http.Error FileSystem.FSUpdate)
+    | GotUpdateSuccess (Result Http.Error ())
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
@@ -137,95 +141,82 @@ main =
         }
 
 
-authCodeDecoder : D.Decoder String
-authCodeDecoder =
-    D.field "code" D.string
+type alias Flags =
+    { authCode : Maybe String
+    , authTokens : Maybe Auth.AuthTokens
+    , fs : FileSystem
+    }
+
+
+flagDecoder : D.Decoder Flags
+flagDecoder =
+    D.map3 Flags
+        (D.maybe (D.field "code" D.string))
+        (D.maybe (D.field "tokens" Auth.tokensDecoder))
+        (D.field "fs" FileSystem.decode)
+
+
+encodeFlags : Flags -> E.Value
+encodeFlags flags =
+    case flags.authTokens of
+        Just tokens ->
+            E.object [ ( "tokens", Auth.encodeTokens tokens ), ( "fs", FileSystem.encode flags.fs ) ]
+
+        Nothing ->
+            E.object [ ( "fs", FileSystem.encode flags.fs ) ]
 
 
 {-| Initialises from storage modal
 -}
 init : E.Value -> ( Model, Cmd Msg )
-init flags =
-    let
-        authState =
-            case D.decodeValue authCodeDecoder flags of
-                Ok code ->
-                    Authenticating code
+init flagsValue =
+    case D.decodeValue flagDecoder flagsValue of
+        Ok flags ->
+            let
+                authState =
+                    case ( flags.authCode, flags.authTokens ) of
+                        ( Just code, _ ) ->
+                            Auth.Authenticating code
 
-                Err _ ->
-                    Unauthenticated
+                        ( _, Just tokens ) ->
+                            Auth.CheckingSubscription tokens
 
-        initModel =
-            case D.decodeValue FileSystem.decode flags of
-                Ok fs ->
-                    { fs = fs
-                    , viewing = ViewTypeFolder { id = FileSystem.getRootId fs, editing = NotEditingFolder }
+                        _ ->
+                            Auth.Unauthenticated
+
+                initModel =
+                    { fs = flags.fs
+                    , viewing = ViewTypeFolder { id = FileSystem.getRootId flags.fs, editing = NotEditingFolder }
                     , currentTime = Nothing
                     , authState = authState
+                    , syncStatus = SyncOffline
                     }
+            in
+            case ( flags.authCode, flags.authTokens ) of
+                ( Just code, _ ) ->
+                    ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, Auth.exchangeAuthCode GotAuthResponse code ] )
 
-                Err _ ->
-                    let
-                        rootId =
-                            Id.rootId
-                    in
-                    { fs = FileSystem.new (Folder.new rootId "My Tasks")
-                    , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder }
-                    , currentTime = Nothing
-                    , authState = authState
-                    }
-    in
-    case authState of
-        Authenticating authCode ->
-            ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, exchangeAuthCode authCode ] )
+                ( _, Just tokens ) ->
+                    ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, checkSubscription tokens ] )
 
-        _ ->
-            ( initModel, Time.now |> Task.perform SetTime )
+                _ ->
+                    ( initModel, Time.now |> Task.perform SetTime )
 
+        Err _ ->
+            let
+                rootId =
+                    Id.rootId
 
-authBase : String
-authBase =
-    "https://auth.may.hazelfire.net"
-
-
-clientId : String
-clientId =
-    "1qu0jlg90401pc5lf41jukbd15"
-
-
-type alias AuthResponse =
-    { idToken : String
-    , accessToken : String
-    , refreshToken : String
-    , expiresIn : Int
-    }
-
-
-tokenResponseDecoder : D.Decoder AuthResponse
-tokenResponseDecoder =
-    D.map4 AuthResponse
-        (D.field "id_token" D.string)
-        (D.field "access_token" D.string)
-        (D.field "refresh_token" D.string)
-        (D.field "expires_in" D.int)
-
-
-exchangeAuthCode : String -> Cmd Msg
-exchangeAuthCode authCode =
-    Http.request
-        { url = authBase ++ "/oauth2/token"
-        , method = "POST"
-        , body = Http.stringBody "application/x-www-form-urlencoded" (exchangeAuthCodeBody authCode)
-        , headers = []
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectJson GotAuthResponse tokenResponseDecoder
-        }
-
-
-exchangeAuthCodeBody : String -> String
-exchangeAuthCodeBody code =
-    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=https://may.hazelfire.net/&code=" ++ code
+                ( model, command ) =
+                    saveToLocalStorage
+                        { fs = FileSystem.new (Folder.new rootId "My Tasks")
+                        , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder }
+                        , currentTime = Nothing
+                        , authState = Auth.Unauthenticated
+                        , syncStatus = SyncOffline
+                        }
+            in
+            ( model, Cmd.batch [ command, Time.now |> Task.perform SetTime ] )
 
 
 pure : a -> ( a, Cmd msg )
@@ -249,13 +240,13 @@ update message model =
             ( model, Random.generate (NewFolder parentId) Id.generate )
 
         NewFolder parentId id ->
-            saveToLocalStorage <| { model | fs = FileSystem.addFolder parentId (Folder.new id "New Folder") model.fs }
+            saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addFolder parentId (Folder.new id "New Folder") model.fs }
 
         CreateTask parentId ->
             ( model, Random.generate (NewTask parentId) Id.generate )
 
         NewTask parentId taskId ->
-            saveToLocalStorage <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
+            saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
 
         SetTime time ->
             pure <| { model | currentTime = Just time }
@@ -279,14 +270,14 @@ update message model =
                 fsChange =
                     mapFileSystem (FileSystem.mapOnFolder fid (Folder.rename name)) model
             in
-            saveToLocalStorage <| mapViewing (mapFolderView (mapFolderEditing (always NotEditingFolder))) fsChange
+            saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (mapFolderEditing (always NotEditingFolder))) fsChange
 
         SetTaskName tid name ->
             let
                 fsChange =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.rename name)) model
             in
-            saveToLocalStorage <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+            saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
 
         StartEditingTaskDuration ->
             withCommand (always (setFocus "taskduration")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskDuration "")))) model
@@ -305,10 +296,10 @@ update message model =
                 fsChange =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.setDuration duration)) model
             in
-            saveToLocalStorage <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+            saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
 
         SetTaskDue tid due ->
-            saveToLocalStorage <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
+            saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
 
         SetTaskDueNow tid ->
             ( model, Time.now |> Task.perform (addWeek >> Just >> SetTaskDue tid) )
@@ -336,7 +327,7 @@ update message model =
                         fsChange =
                             mapFileSystem (FileSystem.deleteFolder fid) model
                     in
-                    saveToLocalStorage <| mapViewing (always (newFolderView pid)) fsChange
+                    saveToLocalStorageAndUpdate <| mapViewing (always (newFolderView pid)) fsChange
 
                 _ ->
                     pure model
@@ -352,34 +343,43 @@ update message model =
                         fsChange =
                             mapFileSystem (FileSystem.deleteTask tid) model
                     in
-                    saveToLocalStorage <| mapViewing (always (newFolderView pid)) fsChange
+                    saveToLocalStorageAndUpdate <| mapViewing (always (newFolderView pid)) fsChange
 
                 _ ->
                     pure model
 
         GotAuthResponse (Err _) ->
-            pure <| { model | authState = AuthFailed }
+            pure <| { model | authState = Auth.AuthFailed }
 
         GotAuthResponse (Ok response) ->
-            ( { model | authState = CheckingSubscription response }, checkSubscription response )
+            let
+                ( newModel, command ) =
+                    saveToLocalStorage { model | authState = Auth.CheckingSubscription response }
+            in
+            ( newModel, Cmd.batch [ command, checkSubscription response ] )
 
         GotSubscriptionCheck (Err _) ->
-            pure <| { model | authState = AuthFailed }
+            pure <| { model | authState = Auth.AuthFailed }
 
         GotSubscriptionCheck (Ok False) ->
-            case model.authState of
-                CheckingSubscription authResponse ->
-                    pure <| { model | authState = SubscriptionNeeded authResponse }
+            case Auth.stateAuthTokens model.authState of
+                Just authResponse ->
+                    pure <| { model | authState = Auth.SubscriptionNeeded authResponse }
 
                 _ ->
                     pure model
 
         GotSubscriptionCheck (Ok True) ->
-            pure <| { model | authState = Authenticated }
+            case Auth.stateAuthTokens model.authState of
+                Just authResponse ->
+                    ( { model | authState = Auth.Authenticated authResponse, syncStatus = Retreiving }, requestNodes authResponse )
+
+                _ ->
+                    pure model
 
         RequestSubscription ->
-            case model.authState of
-                SubscriptionNeeded authResponse ->
+            case Auth.stateAuthTokens model.authState of
+                Just authResponse ->
                     ( model, requestSubscription authResponse )
 
                 _ ->
@@ -389,7 +389,24 @@ update message model =
             ( model, openStripe sessionId )
 
         GotSubscriptionSessionId (Err _) ->
-            pure <| { model | authState = AuthFailed }
+            pure <| { model | authState = Auth.AuthFailed }
+
+        GotNodes (Ok fsUpdate) ->
+            case Auth.stateAuthTokens model.authState of
+                Just authResponse ->
+                    ( { model | fs = FileSystem.updateFS fsUpdate model.fs, syncStatus = Updating }, sendSyncList authResponse (FileSystem.syncList model.fs) )
+
+                _ ->
+                    pure model
+
+        GotNodes (Err _) ->
+            pure <| { model | syncStatus = RetreiveFailed }
+
+        GotUpdateSuccess (Err _) ->
+            pure <| { model | syncStatus = UpdateFailed }
+
+        GotUpdateSuccess (Ok _) ->
+            pure <| { model | syncStatus = Synced, fs = FileSystem.emptySyncList model.fs }
 
         NoOp ->
             pure model
@@ -400,26 +417,52 @@ backendBase =
     "https://api.may.hazelfire.net"
 
 
-requestSubscription : AuthResponse -> Cmd Msg
-requestSubscription response =
+sendSyncList : Auth.AuthTokens -> SyncList -> Cmd Msg
+sendSyncList tokens synclist =
+    Http.request
+        { url = backendBase ++ "/nodes"
+        , method = "PATCH"
+        , body = Http.stringBody "application/json" (E.encode 0 (SyncList.encode synclist))
+        , headers = [ Auth.authHeader tokens ]
+        , timeout = Nothing
+        , tracker = Nothing
+        , expect = Http.expectWhatever GotUpdateSuccess
+        }
+
+
+requestNodes : Auth.AuthTokens -> Cmd Msg
+requestNodes tokens =
+    Http.request
+        { url = backendBase ++ "/nodes"
+        , method = "GET"
+        , body = Http.emptyBody
+        , headers = [ Auth.authHeader tokens ]
+        , timeout = Nothing
+        , tracker = Nothing
+        , expect = Http.expectJson GotNodes FileSystem.fsUpdateDecoder
+        }
+
+
+requestSubscription : Auth.AuthTokens -> Cmd Msg
+requestSubscription tokens =
     Http.request
         { url = backendBase ++ "/subscription_session"
         , method = "GET"
         , body = Http.emptyBody
-        , headers = [ Http.header "Authorization" response.idToken ]
+        , headers = [ Auth.authHeader tokens ]
         , timeout = Nothing
         , tracker = Nothing
         , expect = Http.expectJson GotSubscriptionSessionId D.string
         }
 
 
-checkSubscription : AuthResponse -> Cmd Msg
-checkSubscription response =
+checkSubscription : Auth.AuthTokens -> Cmd Msg
+checkSubscription tokens =
     Http.request
         { url = backendBase ++ "/subscription"
         , method = "GET"
         , body = Http.emptyBody
-        , headers = [ Http.header "Authorization" response.idToken ]
+        , headers = [ Auth.authHeader tokens ]
         , timeout = Nothing
         , tracker = Nothing
         , expect = Http.expectJson GotSubscriptionCheck D.bool
@@ -428,7 +471,24 @@ checkSubscription response =
 
 saveToLocalStorage : Model -> ( Model, Cmd msg )
 saveToLocalStorage =
-    withCommand (\model -> setLocalStorage (FileSystem.encode model.fs))
+    withCommand (\model -> setLocalStorage (encodeFlags (Flags Nothing (Auth.stateAuthTokens model.authState) model.fs)))
+
+
+saveToLocalStorageAndUpdate : Model -> ( Model, Cmd Msg )
+saveToLocalStorageAndUpdate model =
+    case Auth.stateAuthTokens model.authState of
+        Just tokens ->
+            let
+                sendSyncLists =
+                    sendSyncList tokens (FileSystem.syncList model.fs)
+
+                ( newModel, command ) =
+                    saveToLocalStorage model
+            in
+            ( { newModel | syncStatus = Updating }, Cmd.batch [ command, sendSyncLists ] )
+
+        Nothing ->
+            saveToLocalStorage model
 
 
 withCommand : (a -> Cmd msg) -> a -> ( a, Cmd msg )
@@ -509,32 +569,33 @@ viewHeader : Model -> Html Msg
 viewHeader model =
     let
         authStatus =
-            case model.authState of
-                Unauthenticated ->
+            Auth.authStateToString model.authState
+
+        syncStatus =
+            case model.syncStatus of
+                SyncOffline ->
                     "Offline"
 
-                Authenticating _ ->
-                    "Authenticating..."
+                Synced ->
+                    "Synced"
 
-                CheckingSubscription _ ->
-                    "Checking Subscription"
+                Retreiving ->
+                    "Retreiving"
 
-                AuthFailed ->
-                    "Auth Failed"
+                RetreiveFailed ->
+                    "RetrieveFailed"
 
-                Authenticated ->
-                    "Authenticated"
+                Updating ->
+                    "Updating"
 
-                SubscriptionNeeded _ ->
-                    "Get a Subscription"
-
-                SubscriptionRequested ->
-                    "Forwarding you to payment"
+                UpdateFailed ->
+                    "UpdateFailed"
     in
     nav [ class "ui menu" ]
         [ a [ class "item" ] [ text "May" ]
         , ul [ class "right menu" ]
-            [ li [ class "item" ] [ text authStatus ]
+            [ li [ class "item" ] [ text syncStatus ]
+            , li [ class "item" ] [ text authStatus ]
             , li [ class "item" ]
                 [ a
                     [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code"
@@ -690,60 +751,82 @@ viewFolderDetails folderView fs =
                 _ ->
                     False
     in
-    case FileSystem.getFolder folderId fs of
-        Just folder ->
-            let
-                nameText =
-                    case folderView.editing of
-                        EditingFolderName name ->
-                            name
+    if folderId == Id.rootId then
+        div []
+            [ div [ class "ui header attached top" ]
+                [ text "My Tasks"
+                ]
+            , div [ class "ui segment attached" ]
+                [ h3 [ class "ui header" ]
+                    [ text "Folders"
+                    , viewButton "Add" (CreateFolder folderId)
+                    ]
+                , viewFolderList folderId fs
+                ]
+            , div [ class "ui segment attached" ]
+                [ h3 [ class "ui header" ]
+                    [ text "Tasks"
+                    , viewButton "Add" (CreateTask folderId)
+                    ]
+                , viewTaskList folderId fs
+                ]
+            ]
 
-                        _ ->
-                            Folder.name folder
-            in
-            div []
-                ((if confirmDelete then
-                    [ div [ class "ui modal active" ]
-                        [ div [ class "header" ] [ text "Confirm Delete" ]
-                        , div [ class "content" ]
-                            [ div [ class "description" ]
-                                [ p [] [ text "Are you sure that you want to delete this folder?" ] ]
-                            ]
-                        , div [ class "actions" ]
-                            [ div [ class "ui black deny button", onClick CloseConfirmDeleteFolder ]
-                                [ text "Cancel" ]
-                            , div [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
+    else
+        case FileSystem.getFolder folderId fs of
+            Just folder ->
+                let
+                    nameText =
+                        case folderView.editing of
+                            EditingFolderName name ->
+                                name
+
+                            _ ->
+                                Folder.name folder
+                in
+                div []
+                    ((if confirmDelete then
+                        [ div [ class "ui modal active" ]
+                            [ div [ class "header" ] [ text "Confirm Delete" ]
+                            , div [ class "content" ]
+                                [ div [ class "description" ]
+                                    [ p [] [ text "Are you sure that you want to delete this folder?" ] ]
+                                ]
+                            , div [ class "actions" ]
+                                [ div [ class "ui black deny button", onClick CloseConfirmDeleteFolder ]
+                                    [ text "Cancel" ]
+                                , div [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
+                                ]
                             ]
                         ]
-                    ]
 
-                  else
-                    []
-                 )
-                    ++ [ div [ class "ui header attached top" ]
-                            [ viewBackButton (FileSystem.folderParent folderId fs)
-                            , editableField editingName "foldername" nameText StartEditingFolderName ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
-                            , viewButton "Delete" ConfirmDeleteFolder
-                            ]
-                       , div [ class "ui segment attached" ]
-                            [ h3 [ class "ui header" ]
-                                [ text "Folders"
-                                , viewButton "Add" (CreateFolder folderId)
+                      else
+                        []
+                     )
+                        ++ [ div [ class "ui header attached top" ]
+                                [ viewBackButton (FileSystem.folderParent folderId fs)
+                                , editableField editingName "foldername" nameText StartEditingFolderName ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
+                                , viewButton "Delete" ConfirmDeleteFolder
                                 ]
-                            , viewFolderList folderId fs
-                            ]
-                       , div [ class "ui segment attached" ]
-                            [ h3 [ class "ui header" ]
-                                [ text "Tasks"
-                                , viewButton "Add" (CreateTask folderId)
+                           , div [ class "ui segment attached" ]
+                                [ h3 [ class "ui header" ]
+                                    [ text "Folders"
+                                    , viewButton "Add" (CreateFolder folderId)
+                                    ]
+                                , viewFolderList folderId fs
                                 ]
-                            , viewTaskList folderId fs
-                            ]
-                       ]
-                )
+                           , div [ class "ui segment attached" ]
+                                [ h3 [ class "ui header" ]
+                                    [ text "Tasks"
+                                    , viewButton "Add" (CreateTask folderId)
+                                    ]
+                                , viewTaskList folderId fs
+                                ]
+                           ]
+                    )
 
-        Nothing ->
-            div [ class "ui header attached top" ] [ text "Could not find folder" ]
+            Nothing ->
+                div [ class "ui header attached top" ] [ text "Could not find folder" ]
 
 
 viewTaskDetails : TaskView -> FileSystem -> Html Msg
@@ -910,29 +993,11 @@ viewBackButton parentId =
             button [ class "ui button aligned left disabled" ] [ text "Back" ]
 
 
-mapMaybe : (a -> Maybe b) -> List a -> List b
-mapMaybe pred list =
-    case list of
-        x :: rest ->
-            case pred x of
-                Just y ->
-                    y :: mapMaybe pred rest
-
-                Nothing ->
-                    mapMaybe pred rest
-
-        _ ->
-            []
-
-
 viewFolderList : Id Folder -> FileSystem -> Html Msg
 viewFolderList folderId fs =
     let
-        childrenIds =
-            FileSystem.foldersInFolder folderId fs
-
         childrenFolders =
-            mapMaybe (\x -> FileSystem.getFolder x fs) childrenIds
+            FileSystem.foldersInFolder folderId fs
     in
     viewCards (List.map viewFolderCard childrenFolders)
 
@@ -940,11 +1005,8 @@ viewFolderList folderId fs =
 viewTaskList : Id Folder -> FileSystem -> Html Msg
 viewTaskList folderId fs =
     let
-        childrenIds =
-            FileSystem.tasksInFolder folderId fs
-
         childrenTasks =
-            mapMaybe (\x -> FileSystem.getTask x fs) childrenIds
+            FileSystem.tasksInFolder folderId fs
     in
     viewCards (List.map viewTaskCard childrenTasks)
 

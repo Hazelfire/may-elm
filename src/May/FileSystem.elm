@@ -1,5 +1,6 @@
 module May.FileSystem exposing
-    ( FileSystem
+    ( FSUpdate
+    , FileSystem
     , addFolder
     , addTask
     , allFolders
@@ -7,49 +8,66 @@ module May.FileSystem exposing
     , decode
     , deleteFolder
     , deleteTask
+    , emptySyncList
     , encode
     , folderParent
     , foldersInFolder
+    , fsUpdateDecoder
     , getFolder
     , getRootId
     , getTask
     , mapOnFolder
     , mapOnTask
+    , needsSync
     , new
+    , syncList
     , taskParent
     , tasksInFolder
+    , updateFS
     )
 
 {-| This module uses a graph to represent all the types of relationships
 you can have with tasks, labels etc
+
+It also handles the updating of the file system from the backend.
+
 -}
 
 import Json.Decode as D
 import Json.Encode as E
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
+import May.SyncList as SyncList exposing (SyncList)
 import May.Task as Task exposing (Task)
-
-
-{-| All the relationships in the graph
--}
-type Edge
-    = ParentOfTask (Id Folder) (Id Task)
-    | ParentOfFolder (Id Folder) (Id Folder)
+import Time
 
 
 {-| All the different types of nodes in the graph
+Note that the folderNode is always garaunteed to have a parent. The root
+folder is not stored as a node here, but in the filesystem object
 -}
 type Node
-    = FolderNode Folder
-    | TaskNode Task
+    = FolderNode FolderInfo
+    | TaskNode TaskInfo
+
+
+type alias FolderInfo =
+    { parent : Id Folder
+    , folder : Folder
+    }
+
+
+type alias TaskInfo =
+    { parent : Id Folder
+    , task : Task
+    }
 
 
 type FileSystem
     = FileSystem
         { nodes : List Node
-        , edges : List Edge
         , root : Id Folder
+        , syncList : SyncList
         }
 
 
@@ -89,29 +107,29 @@ filterMaybe pred list =
 addFolder : Id Folder -> Folder -> FileSystem -> FileSystem
 addFolder parentId folder (FileSystem fs) =
     FileSystem
-        { nodes = FolderNode folder :: fs.nodes
-        , edges = ParentOfFolder parentId (Folder.id folder) :: fs.edges
+        { nodes = FolderNode { parent = parentId, folder = folder } :: fs.nodes
         , root = fs.root
+        , syncList = SyncList.addNode (SyncList.SyncUpdateFolder parentId folder) fs.syncList
         }
 
 
 addTask : Id Folder -> Task -> FileSystem -> FileSystem
 addTask parentId task (FileSystem fs) =
     FileSystem
-        { nodes = TaskNode task :: fs.nodes
-        , edges = ParentOfTask parentId (Task.id task) :: fs.edges
+        { nodes = TaskNode { parent = parentId, task = task } :: fs.nodes
         , root = fs.root
+        , syncList = SyncList.addNode (SyncList.SyncUpdateTask parentId task) fs.syncList
         }
 
 
-getFolder : Id Folder -> FileSystem -> Maybe Folder
-getFolder folderId (FileSystem fs) =
+getFolderInfo : Id Folder -> FileSystem -> Maybe FolderInfo
+getFolderInfo folderId (FileSystem fs) =
     findMaybe
         (\x ->
             case x of
-                FolderNode node ->
-                    if Folder.id node == folderId then
-                        Just node
+                FolderNode info ->
+                    if Folder.id info.folder == folderId then
+                        Just info
 
                     else
                         Nothing
@@ -122,14 +140,14 @@ getFolder folderId (FileSystem fs) =
         fs.nodes
 
 
-getTask : Id Task -> FileSystem -> Maybe Task
-getTask taskId (FileSystem fs) =
+getTaskInfo : Id Task -> FileSystem -> Maybe TaskInfo
+getTaskInfo taskId (FileSystem fs) =
     findMaybe
         (\x ->
             case x of
-                TaskNode node ->
-                    if Task.id node == taskId then
-                        Just node
+                TaskNode info ->
+                    if Task.id info.task == taskId then
+                        Just info
 
                     else
                         Nothing
@@ -138,136 +156,45 @@ getTask taskId (FileSystem fs) =
                     Nothing
         )
         fs.nodes
+
+
+getFolder : Id Folder -> FileSystem -> Maybe Folder
+getFolder folderId fs =
+    getFolderInfo folderId fs
+        |> Maybe.map .folder
+
+
+getTask : Id Task -> FileSystem -> Maybe Task
+getTask taskId fs =
+    getTaskInfo taskId fs |> Maybe.map .task
 
 
 new : Folder -> FileSystem
 new folder =
-    FileSystem { nodes = [ FolderNode folder ], edges = [], root = Folder.id folder }
+    FileSystem { nodes = [], root = Folder.id folder, syncList = SyncList.empty }
 
 
 folderParent : Id Folder -> FileSystem -> Maybe (Id Folder)
-folderParent folderId (FileSystem fs) =
-    findMaybe
-        (\x ->
-            case x of
-                ParentOfFolder pid fid ->
-                    if fid == folderId then
-                        Just pid
-
-                    else
-                        Nothing
-
-                _ ->
-                    Nothing
-        )
-        fs.edges
+folderParent folderId fs =
+    getFolderInfo folderId fs |> Maybe.map .parent
 
 
 taskParent : Id Task -> FileSystem -> Maybe (Id Folder)
-taskParent taskId (FileSystem fs) =
-    findMaybe
-        (\x ->
-            case x of
-                ParentOfTask pid fid ->
-                    if fid == taskId then
-                        Just pid
-
-                    else
-                        Nothing
-
-                _ ->
-                    Nothing
-        )
-        fs.edges
+taskParent taskId fs =
+    getTaskInfo taskId fs |> Maybe.map .parent
 
 
-foldersInFolder : Id Folder -> FileSystem -> List (Id Folder)
+foldersInFolder : Id Folder -> FileSystem -> List Folder
 foldersInFolder folderId (FileSystem fs) =
     filterMaybe
         (\x ->
             case x of
-                ParentOfFolder pid fid ->
-                    if pid == folderId then
-                        Just fid
+                FolderNode info ->
+                    if info.parent == folderId then
+                        Just info.folder
 
                     else
                         Nothing
-
-                _ ->
-                    Nothing
-        )
-        fs.edges
-
-
-tasksInFolder : Id Folder -> FileSystem -> List (Id Task)
-tasksInFolder folderId (FileSystem fs) =
-    filterMaybe
-        (\x ->
-            case x of
-                ParentOfTask pid tid ->
-                    if pid == folderId then
-                        Just tid
-
-                    else
-                        Nothing
-
-                _ ->
-                    Nothing
-        )
-        fs.edges
-
-
-mapOnFolder : Id Folder -> (Folder -> Folder) -> FileSystem -> FileSystem
-mapOnFolder folderId mapFunc (FileSystem fs) =
-    let
-        newNodes =
-            List.map
-                (\x ->
-                    case x of
-                        FolderNode folder ->
-                            if Folder.id folder == folderId then
-                                FolderNode <| mapFunc folder
-
-                            else
-                                FolderNode <| folder
-
-                        a ->
-                            a
-                )
-                fs.nodes
-    in
-    FileSystem { fs | nodes = newNodes }
-
-
-mapOnTask : Id Task -> (Task -> Task) -> FileSystem -> FileSystem
-mapOnTask taskId mapFunc (FileSystem fs) =
-    let
-        newNodes =
-            List.map
-                (\x ->
-                    case x of
-                        TaskNode task ->
-                            if Task.id task == taskId then
-                                TaskNode <| mapFunc task
-
-                            else
-                                TaskNode task
-
-                        a ->
-                            a
-                )
-                fs.nodes
-    in
-    FileSystem { fs | nodes = newNodes }
-
-
-allTasks : FileSystem -> List Task
-allTasks (FileSystem fs) =
-    filterMaybe
-        (\x ->
-            case x of
-                TaskNode task ->
-                    Just task
 
                 _ ->
                     Nothing
@@ -275,13 +202,109 @@ allTasks (FileSystem fs) =
         fs.nodes
 
 
-allFolders : FileSystem -> List Folder
-allFolders (FileSystem fs) =
+tasksInFolder : Id Folder -> FileSystem -> List Task
+tasksInFolder taskId (FileSystem fs) =
     filterMaybe
         (\x ->
             case x of
-                FolderNode folder ->
-                    Just folder
+                TaskNode info ->
+                    if info.parent == taskId then
+                        Just info.task
+
+                    else
+                        Nothing
+
+                _ ->
+                    Nothing
+        )
+        fs.nodes
+
+
+mapOnFolder : Id Folder -> (Folder -> Folder) -> FileSystem -> FileSystem
+mapOnFolder folderId mapFunc (FileSystem fs) =
+    case fs.nodes of
+        [] ->
+            FileSystem fs
+
+        x :: rest ->
+            let
+                (FileSystem restFs) =
+                    mapOnFolder folderId mapFunc (FileSystem { fs | nodes = rest })
+            in
+            case x of
+                FolderNode info ->
+                    if Folder.id info.folder == folderId then
+                        let
+                            newFolder =
+                                mapFunc info.folder
+                        in
+                        FileSystem { restFs | nodes = FolderNode { info | folder = newFolder } :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateFolder info.parent newFolder) restFs.syncList }
+
+                    else
+                        FileSystem { restFs | nodes = FolderNode info :: restFs.nodes }
+
+                a ->
+                    FileSystem { restFs | nodes = a :: restFs.nodes }
+
+
+mapOnTask : Id Task -> (Task -> Task) -> FileSystem -> FileSystem
+mapOnTask taskId mapFunc (FileSystem fs) =
+    case fs.nodes of
+        [] ->
+            FileSystem fs
+
+        x :: rest ->
+            let
+                (FileSystem restFs) =
+                    mapOnTask taskId mapFunc (FileSystem { fs | nodes = rest })
+            in
+            case x of
+                TaskNode info ->
+                    if Task.id info.task == taskId then
+                        let
+                            newTask =
+                                mapFunc info.task
+                        in
+                        FileSystem { restFs | nodes = TaskNode { info | task = newTask } :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateTask info.parent newTask) restFs.syncList }
+
+                    else
+                        FileSystem { restFs | nodes = TaskNode info :: restFs.nodes }
+
+                a ->
+                    FileSystem { restFs | nodes = a :: restFs.nodes }
+
+
+allTaskDetails : FileSystem -> List TaskInfo
+allTaskDetails (FileSystem fs) =
+    filterMaybe
+        (\x ->
+            case x of
+                TaskNode info ->
+                    Just info
+
+                _ ->
+                    Nothing
+        )
+        fs.nodes
+
+
+allTasks : FileSystem -> List Task
+allTasks fs =
+    List.map .task <| allTaskDetails fs
+
+
+allFolders : FileSystem -> List Folder
+allFolders fs =
+    List.map .folder <| allFolderDetails fs
+
+
+allFolderDetails : FileSystem -> List FolderInfo
+allFolderDetails (FileSystem fs) =
+    filterMaybe
+        (\x ->
+            case x of
+                FolderNode info ->
+                    Just info
 
                 _ ->
                     Nothing
@@ -292,64 +315,80 @@ allFolders (FileSystem fs) =
 encode : FileSystem -> E.Value
 encode (FileSystem fs) =
     E.object
-        [ ( "tasks", E.list Task.encode (allTasks (FileSystem fs)) )
-        , ( "folders", E.list Folder.encode (allFolders (FileSystem fs)) )
+        [ ( "tasks", E.list encodeTaskNode (allTaskDetails (FileSystem fs)) )
+        , ( "folders", E.list encodeFolderNode (allFolderDetails (FileSystem fs)) )
         , ( "root", Id.encode fs.root )
-        , ( "edges", E.list encodeEdge fs.edges )
+        , ( "synclist", SyncList.encode fs.syncList )
         ]
 
 
-encodeEdge : Edge -> E.Value
-encodeEdge edge =
-    case edge of
-        ParentOfFolder from to ->
-            E.object [ ( "type", E.string "ParentOfFolder" ), ( "from", Id.encode from ), ( "to", Id.encode to ) ]
+encodeTaskNode : TaskInfo -> E.Value
+encodeTaskNode info =
+    let
+        fields =
+            [ ( "name", E.string (Task.name info.task) )
+            , ( "duration", E.float (Task.duration info.task) )
+            , ( "id", Id.encode (Task.id info.task) )
+            , ( "pid", Id.encode info.parent )
+            ]
+    in
+    case Task.due info.task of
+        Just dueDate ->
+            E.object (( "due", E.int (Time.posixToMillis dueDate) ) :: fields)
 
-        ParentOfTask from to ->
-            E.object [ ( "type", E.string "ParentOfTask" ), ( "from", Id.encode from ), ( "to", Id.encode to ) ]
+        Nothing ->
+            E.object fields
+
+
+encodeFolderNode : FolderInfo -> E.Value
+encodeFolderNode info =
+    E.object
+        [ ( "id", Id.encode (Folder.id info.folder) )
+        , ( "name", E.string (Folder.name info.folder) )
+        , ( "pid", Id.encode info.parent )
+        ]
+
+
+decodeTaskNode : D.Decoder Node
+decodeTaskNode =
+    Task.decode
+        |> D.andThen
+            (\task ->
+                D.field "pid" Id.decode
+                    |> D.andThen
+                        (\pid ->
+                            D.succeed (TaskNode { parent = pid, task = task })
+                        )
+            )
+
+
+decodeFolderNode : D.Decoder Node
+decodeFolderNode =
+    Folder.decode
+        |> D.andThen
+            (\folder ->
+                D.field "pid" Id.decode
+                    |> D.andThen
+                        (\pid ->
+                            D.succeed (FolderNode { parent = pid, folder = folder })
+                        )
+            )
 
 
 decode : D.Decoder FileSystem
 decode =
     D.map4
-        (\tasks folders edges root ->
+        (\tasks folders root synclist ->
             FileSystem
-                { nodes = List.map FolderNode folders ++ List.map TaskNode tasks
-                , edges = edges
+                { nodes = folders ++ tasks
                 , root = root
+                , syncList = synclist
                 }
         )
-        (D.field "tasks" (D.list Task.decode))
-        (D.field "folders" (D.list Folder.decode))
-        (D.field "edges" (D.list decodeEdge))
+        (D.field "tasks" (D.list decodeTaskNode))
+        (D.field "folders" (D.list decodeFolderNode))
         (D.field "root" Id.decode)
-
-
-decodeEdge : D.Decoder Edge
-decodeEdge =
-    D.field "type" D.string
-        |> D.andThen
-            (\type_ ->
-                if type_ == "ParentOfFolder" then
-                    D.map2 ParentOfFolder
-                        (D.field "from" Id.decode)
-                        (D.field "to" Id.decode)
-
-                else
-                    D.map2 ParentOfTask
-                        (D.field "from" Id.decode)
-                        (D.field "to" Id.decode)
-            )
-
-
-applyAll : List (a -> a) -> a -> a
-applyAll updates init =
-    case updates of
-        a :: rest ->
-            applyAll rest (a init)
-
-        [] ->
-            init
+        (D.field "synclist" SyncList.decode)
 
 
 deleteFolder : Id Folder -> FileSystem -> FileSystem
@@ -367,29 +406,45 @@ deleteFolder fid fs =
         tasksDeleted =
             deleteTasks_ taskChildIds foldersDeleted
 
-        folderEdgesDeleted =
-            applyAll (List.map deleteFolderEdges (fid :: folderChildIds)) tasksDeleted
+        syncNodeIds =
+            List.map SyncList.SyncFolderId (fid :: folderChildIds) ++ List.map SyncList.SyncTaskId taskChildIds
 
-        taskEdgesDeleted =
-            applyAll (List.map deleteTaskEdges taskChildIds) folderEdgesDeleted
+        (FileSystem inner) =
+            tasksDeleted
+
+        removedSyncList =
+            FileSystem { inner | syncList = applyAll (List.map SyncList.deleteNode syncNodeIds) inner.syncList }
     in
-    taskEdgesDeleted
+    removedSyncList
+
+
+applyAll : List (a -> a) -> a -> a
+applyAll list x =
+    case list of
+        f :: rest ->
+            applyAll rest (f x)
+
+        [] ->
+            x
 
 
 deleteTask : Id Task -> FileSystem -> FileSystem
 deleteTask tid fs =
     let
-        taskEdgesDeleted =
-            deleteTaskEdges tid fs
+        deletedTasks =
+            deleteTasks_ [ tid ] fs
+
+        (FileSystem inner) =
+            deletedTasks
     in
-    deleteTasks_ [ tid ] taskEdgesDeleted
+    FileSystem { inner | syncList = SyncList.deleteNode (SyncList.SyncTaskId tid) inner.syncList }
 
 
 foldersInFolderRecursive : Id Folder -> FileSystem -> List (Id Folder)
 foldersInFolderRecursive fid fs =
     let
         children =
-            foldersInFolder fid fs
+            List.map Folder.id (foldersInFolder fid fs)
     in
     children ++ List.concat (List.map (\x -> foldersInFolderRecursive x fs) children)
 
@@ -398,10 +453,10 @@ tasksInFolderRecursive : Id Folder -> FileSystem -> List (Id Task)
 tasksInFolderRecursive fid fs =
     let
         childrenFolder =
-            foldersInFolder fid fs
+            List.map Folder.id (foldersInFolder fid fs)
 
         taskChildren =
-            tasksInFolder fid fs
+            List.map Task.id (tasksInFolder fid fs)
     in
     taskChildren ++ List.concat (List.map (\x -> tasksInFolderRecursive x fs) childrenFolder)
 
@@ -421,12 +476,12 @@ deleteTasks_ tids (FileSystem fs) =
                                 filterMaybe
                                     (\node ->
                                         case node of
-                                            TaskNode task ->
-                                                if Task.id task == x then
+                                            TaskNode info ->
+                                                if Task.id info.task == x then
                                                     Nothing
 
                                                 else
-                                                    Just (TaskNode task)
+                                                    Just (TaskNode info)
 
                                             a ->
                                                 Just a
@@ -435,42 +490,6 @@ deleteTasks_ tids (FileSystem fs) =
                         }
             in
             deleteTasks_ rest newFS
-
-
-deleteTaskEdges : Id Task -> FileSystem -> FileSystem
-deleteTaskEdges taskId (FileSystem fs) =
-    FileSystem
-        { fs
-            | edges =
-                List.filter
-                    (\x ->
-                        case x of
-                            ParentOfTask _ tid ->
-                                tid /= taskId
-
-                            _ ->
-                                True
-                    )
-                    fs.edges
-        }
-
-
-deleteFolderEdges : Id Folder -> FileSystem -> FileSystem
-deleteFolderEdges folderId (FileSystem fs) =
-    FileSystem
-        { fs
-            | edges =
-                List.filter
-                    (\x ->
-                        case x of
-                            ParentOfTask fid _ ->
-                                fid /= folderId
-
-                            ParentOfFolder fid1 fid2 ->
-                                not (fid1 == folderId || fid2 == folderId)
-                    )
-                    fs.edges
-        }
 
 
 deleteFolders_ : List (Id Folder) -> FileSystem -> FileSystem
@@ -488,12 +507,12 @@ deleteFolders_ fids (FileSystem fs) =
                                 filterMaybe
                                     (\node ->
                                         case node of
-                                            FolderNode folder ->
-                                                if Folder.id folder == x then
+                                            FolderNode info ->
+                                                if Folder.id info.folder == x then
                                                     Nothing
 
                                                 else
-                                                    Just (FolderNode folder)
+                                                    Just (FolderNode info)
 
                                             a ->
                                                 Just a
@@ -507,3 +526,51 @@ deleteFolders_ fids (FileSystem fs) =
 getRootId : FileSystem -> Id Folder
 getRootId (FileSystem fs) =
     fs.root
+
+
+{-| An FSUpdate is an update to the current system
+-}
+type FSUpdate
+    = FSUpdate (List Node)
+
+
+fsUpdateDecoder : D.Decoder FSUpdate
+fsUpdateDecoder =
+    D.map FSUpdate (D.list nodeDecoder)
+
+
+nodeDecoder : D.Decoder Node
+nodeDecoder =
+    D.field "type" D.string
+        |> D.andThen
+            (\type_ ->
+                case type_ of
+                    "folder" ->
+                        decodeFolderNode
+
+                    "task" ->
+                        decodeTaskNode
+
+                    _ ->
+                        D.fail "Invalid node type"
+            )
+
+
+updateFS : FSUpdate -> FileSystem -> FileSystem
+updateFS (FSUpdate update) (FileSystem fs) =
+    FileSystem { fs | nodes = update ++ fs.nodes }
+
+
+needsSync : FileSystem -> Bool
+needsSync (FileSystem fs) =
+    SyncList.needsSync fs.syncList
+
+
+syncList : FileSystem -> SyncList
+syncList (FileSystem fs) =
+    fs.syncList
+
+
+emptySyncList : FileSystem -> FileSystem
+emptySyncList (FileSystem fs) =
+    FileSystem { fs | syncList = SyncList.empty }

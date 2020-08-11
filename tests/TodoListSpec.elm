@@ -2,12 +2,13 @@ module TodoListSpec exposing (suite)
 
 import Expect
 import Http
+import Json.Decode as D
 import Json.Encode as E
 import May.FileSystem as FileSystem
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
-import May.Task as Task
-import Test exposing (..)
+import Result
+import Test exposing (Test, describe, test)
 import TodoList
 import Tuple
 
@@ -30,6 +31,37 @@ applyList actions update init =
 
         [] ->
             init
+
+
+{-| This can't actually be Nothing unless there is something seriously wrong
+with the way FSUpdate is implemented.
+-}
+emptyUpdateM : Maybe FileSystem.FSUpdate
+emptyUpdateM =
+    Result.toMaybe <| D.decodeValue FileSystem.fsUpdateDecoder (E.list (\x -> x) [])
+
+
+authenticatedModel : TodoList.Model
+authenticatedModel =
+    let
+        tokenObject =
+            E.object [ ( "code", E.string "test-code" ) ]
+
+        model =
+            Tuple.first <| TodoList.init tokenObject
+
+        authResponse =
+            { idToken = "", accessToken = "", refreshToken = "", expiresIn = 0 }
+
+        actions =
+            [ TodoList.GotAuthResponse (Ok authResponse)
+            , TodoList.GotSubscriptionCheck (Ok True)
+            ]
+
+        newModel =
+            applyList actions (\a -> TodoList.update a >> Tuple.first) model
+    in
+    newModel
 
 
 suite : Test
@@ -80,6 +112,7 @@ suite =
                             , fs = FileSystem.new (Folder.new rootId "My Tasks")
                             , viewing = TodoList.ViewTypeFolder { id = rootId, editing = TodoList.NotEditingFolder }
                             , authState = TodoList.Unauthenticated
+                            , syncStatus = TodoList.SyncOffline
                             }
                     in
                     Expect.equal actualModel expectedModel
@@ -127,15 +160,37 @@ suite =
             , test "success subscription check returns authenticated" <|
                 \_ ->
                     let
-                        tokenObject =
-                            E.object [ ( "code", E.string "test-code" ) ]
-
-                        model =
-                            Tuple.first <| TodoList.init tokenObject
-
                         newModel =
-                            Tuple.first <| TodoList.update (TodoList.GotSubscriptionCheck (Ok True)) model
+                            authenticatedModel
+
+                        authenticated =
+                            case newModel.authState of
+                                TodoList.Authenticated _ ->
+                                    True
+
+                                _ ->
+                                    False
                     in
-                    Expect.equal TodoList.Authenticated newModel.authState
+                    Expect.equal authenticated True
+            ]
+        , describe "Sync"
+            [ test "GotSubscriptionCheck starts syncing" <|
+                \_ ->
+                    Expect.equal TodoList.Retreiving authenticatedModel.syncStatus
+            , test "If GotNodes is empty, it's time to send our data up" <|
+                \_ ->
+                    case emptyUpdateM of
+                        Nothing ->
+                            Expect.fail "emptyUpdate should exist"
+
+                        Just emptyUpdate ->
+                            let
+                                model =
+                                    authenticatedModel
+
+                                newModel =
+                                    Tuple.first <| TodoList.update (TodoList.GotNodes (Ok emptyUpdate)) model
+                            in
+                            Expect.equal { model | syncStatus = TodoList.Updating } newModel
             ]
         ]
