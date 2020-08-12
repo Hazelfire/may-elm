@@ -41,7 +41,14 @@ type alias Model =
     , currentTime : Maybe Time.Posix
     , authState : Auth.AuthState
     , syncStatus : SyncStatus
+    , notice : Notice
     }
+
+
+type Notice
+    = NoNotice
+    | AskForSubscription
+    | AskConfirmDeleteAccount
 
 
 type SyncStatus
@@ -100,7 +107,7 @@ newTaskView id =
 
 type Msg
     = CreateFolder (Id Folder)
-    | GotAuthResponse (Result Http.Error Auth.AuthTokens)
+    | GotAuthResponse (Result String Auth.AuthTokens)
     | GotSubscriptionCheck (Result Http.Error Bool)
     | GotSubscriptionSessionId (Result Http.Error String)
     | GotNodes (Result Http.Error FileSystem.FSUpdate)
@@ -128,6 +135,11 @@ type Msg
     | ConfirmDeleteTask
     | CloseConfirmDeleteTask
     | DeleteTask (Id Task)
+    | Logout
+    | ConfirmDeleteAccount
+    | CancelConfirmDeleteAccount
+    | DeleteAccount
+    | GotDeleteAccount (Result Http.Error ())
     | NoOp
 
 
@@ -175,8 +187,8 @@ init flagsValue =
             let
                 authState =
                     case ( flags.authCode, flags.authTokens ) of
-                        ( Just code, _ ) ->
-                            Auth.Authenticating code
+                        ( Just _, _ ) ->
+                            Auth.Authenticating
 
                         ( _, Just tokens ) ->
                             Auth.CheckingSubscription tokens
@@ -190,6 +202,7 @@ init flagsValue =
                     , currentTime = Nothing
                     , authState = authState
                     , syncStatus = SyncOffline
+                    , notice = NoNotice
                     }
             in
             case ( flags.authCode, flags.authTokens ) of
@@ -214,6 +227,7 @@ init flagsValue =
                         , currentTime = Nothing
                         , authState = Auth.Unauthenticated
                         , syncStatus = SyncOffline
+                        , notice = NoNotice
                         }
             in
             ( model, Cmd.batch [ command, Time.now |> Task.perform SetTime ] )
@@ -249,7 +263,20 @@ update message model =
             saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
 
         SetTime time ->
-            pure <| { model | currentTime = Just time }
+            let
+                newModel =
+                    { model | currentTime = Just time }
+            in
+            case Auth.stateAuthTokens model.authState of
+                Just tokens ->
+                    if Auth.authTokenNeedsRefresh time tokens then
+                        ( { newModel | authState = Auth.Authenticating }, Auth.refreshTokens GotAuthResponse tokens )
+
+                    else
+                        pure newModel
+
+                Nothing ->
+                    pure newModel
 
         SetView vid ->
             case vid of
@@ -364,7 +391,7 @@ update message model =
         GotSubscriptionCheck (Ok False) ->
             case Auth.stateAuthTokens model.authState of
                 Just authResponse ->
-                    pure <| { model | authState = Auth.SubscriptionNeeded authResponse }
+                    pure <| { model | authState = Auth.SubscriptionNeeded authResponse, notice = AskForSubscription }
 
                 _ ->
                     pure model
@@ -394,7 +421,11 @@ update message model =
         GotNodes (Ok fsUpdate) ->
             case Auth.stateAuthTokens model.authState of
                 Just authResponse ->
-                    ( { model | fs = FileSystem.updateFS fsUpdate model.fs, syncStatus = Updating }, sendSyncList authResponse (FileSystem.syncList model.fs) )
+                    let
+                        ( newModel, command ) =
+                            saveToLocalStorage { model | fs = FileSystem.updateFS fsUpdate model.fs, syncStatus = Updating }
+                    in
+                    ( newModel, Cmd.batch [ command, sendSyncList authResponse (FileSystem.syncList model.fs) ] )
 
                 _ ->
                     pure model
@@ -407,6 +438,40 @@ update message model =
 
         GotUpdateSuccess (Ok _) ->
             pure <| { model | syncStatus = Synced, fs = FileSystem.emptySyncList model.fs }
+
+        Logout ->
+            saveToLocalStorage <| { model | syncStatus = SyncOffline, authState = Auth.Unauthenticated }
+
+        ConfirmDeleteAccount ->
+            pure <| { model | notice = AskConfirmDeleteAccount }
+
+        CancelConfirmDeleteAccount ->
+            pure <| { model | notice = NoNotice }
+
+        DeleteAccount ->
+            case Auth.stateAuthTokens model.authState of
+                Just tokens ->
+                    ( model, Auth.deleteUser GotDeleteAccount tokens )
+
+                Nothing ->
+                    pure model
+
+        GotDeleteAccount (Err _) ->
+            case Auth.stateAuthTokens model.authState of
+                Just tokens ->
+                    pure { model | authState = Auth.DeleteUserFailed tokens }
+
+                Nothing ->
+                    pure model
+
+        GotDeleteAccount (Ok _) ->
+            saveToLocalStorage <|
+                { model
+                    | authState = Auth.Unauthenticated
+                    , syncStatus = SyncOffline
+                    , fs = FileSystem.syncListAll model.fs
+                    , notice = NoNotice
+                }
 
         NoOp ->
             pure model
@@ -458,10 +523,17 @@ requestSubscription tokens =
 
 checkSubscription : Auth.AuthTokens -> Cmd Msg
 checkSubscription tokens =
+    let
+        email =
+            Auth.email tokens
+
+        name =
+            Auth.name tokens
+    in
     Http.request
         { url = backendBase ++ "/subscription"
-        , method = "GET"
-        , body = Http.emptyBody
+        , method = "POST"
+        , body = Http.stringBody "application/json" (E.encode 0 (E.object [ ( "name", E.string name ), ( "email", E.string email ) ]))
         , headers = [ Auth.authHeader tokens ]
         , timeout = Nothing
         , tracker = Nothing
@@ -554,56 +626,106 @@ view model =
     in
     div []
         [ viewHeader model
-        , div [ class "ui divided stackable grid" ]
-            [ div
-                [ class "twelve wide column" ]
-                [ viewStatistics model.currentTime (FileSystem.allTasks model.fs)
-                , itemView
-                ]
-            , div [ class "four wide column" ] [ viewTodo model.currentTime (FileSystem.allTasks model.fs) ]
-            ]
+        , case model.notice of
+            NoNotice ->
+                div [ class "ui divided stackable grid" ]
+                    [ div
+                        [ class "twelve wide column" ]
+                        [ viewStatistics model.currentTime (FileSystem.allTasks model.fs)
+                        , itemView
+                        ]
+                    , div [ class "four wide column" ] [ viewTodo model.currentTime (FileSystem.allTasks model.fs) ]
+                    ]
+
+            _ ->
+                viewNotice model.notice
         ]
+
+
+viewNotice : Notice -> Html Msg
+viewNotice notice =
+    case notice of
+        NoNotice ->
+            div [] []
+
+        AskConfirmDeleteAccount ->
+            div [ class "confirmdeleteaccount" ]
+                [ p [] [ text "Woah! Are you sure you want to delete your account?" ]
+                , p [] [ text "This will not delete any of your tasks that are on your devices. They will continue to work offline." ]
+                , p [] [ text "All records of you in all our online systems will be removed except for payment records. Your tasks and folders will not sync anymore." ]
+                , p [] [ text "Your current subscription with the service will be cancelled, and you will no longer get charged" ]
+                , p [] [ text "You will need to create a new account to get another subscription for this service" ]
+                , p [] [ text "Are you sure you want to delete your account?" ]
+                , button [ class "ui button", onClick CancelConfirmDeleteAccount ] [ text "No, go back" ]
+                , button [ class "ui button", onClick DeleteAccount ] [ text "Yes I'm sure. Delete my account" ]
+                ]
+
+        AskForSubscription ->
+            div [ class "askforsubscription" ]
+                [ p [] [ text "Welcome to the May!" ]
+                , button [ class "ui button", onClick RequestSubscription ] [ text "Get Subscription" ]
+                , p [] [ text "If you don't want a subscription, you don't need an account. Everything will still work offline" ]
+                , button [ class "ui button", onClick DeleteAccount ] [ text "Delete Account" ]
+                ]
 
 
 viewHeader : Model -> Html Msg
 viewHeader model =
     let
-        authStatus =
-            Auth.authStateToString model.authState
+        status =
+            case model.authState of
+                Auth.Authenticated _ ->
+                    case model.syncStatus of
+                        SyncOffline ->
+                            "Offline"
 
-        syncStatus =
-            case model.syncStatus of
-                SyncOffline ->
-                    "Offline"
+                        Synced ->
+                            "Synced"
 
-                Synced ->
-                    "Synced"
+                        Retreiving ->
+                            "Retreiving"
 
-                Retreiving ->
-                    "Retreiving"
+                        RetreiveFailed ->
+                            "RetrieveFailed"
 
-                RetreiveFailed ->
-                    "RetrieveFailed"
+                        Updating ->
+                            "Updating"
 
-                Updating ->
-                    "Updating"
+                        UpdateFailed ->
+                            "UpdateFailed"
 
-                UpdateFailed ->
-                    "UpdateFailed"
+                _ ->
+                    Auth.authStateToString model.authState
     in
     nav [ class "ui menu" ]
         [ a [ class "item" ] [ text "May" ]
         , ul [ class "right menu" ]
-            [ li [ class "item" ] [ text syncStatus ]
-            , li [ class "item" ] [ text authStatus ]
-            , li [ class "item" ]
-                [ a
-                    [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code"
-                    , class "ui button"
-                    ]
-                    [ text "Login" ]
-                ]
-            ]
+            (li [ class "item" ] [ text status ]
+                :: (case model.authState of
+                        Auth.Authenticated _ ->
+                            [ li [ class "item" ]
+                                [ button [ class "ui button", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                                ]
+                            , li [ class "item" ]
+                                [ button
+                                    [ class "ui button"
+                                    , onClick Logout
+                                    ]
+                                    [ text "Logout" ]
+                                ]
+                            ]
+
+                        _ ->
+                            [ li [ class "item" ]
+                                [ a
+                                    [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code&scopes=account.delete%20nodes.read%20nodes.write%20subscription.read%20account.delete"
+                                    , class "ui button"
+                                    ]
+                                    [ text "Login" ]
+                                ]
+                            ]
+                   )
+            )
         ]
 
 

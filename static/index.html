@@ -36,7 +36,11 @@ if(params.has('code')){
   localStorage.setItem('may-auth-code', params.get('code'));
   window.location.replace("/");
 }
-else{
+else if(params.has("stripe_status")){
+  // This is only for the purpose of getting rid of the status. Which we don't actually need
+  window.location.replace("/");
+}
+else {
   var storedData = localStorage.getItem('may-model');
   var storedData = storedData ? JSON.parse(storedData) : {};
   let code = localStorage.getItem('may-auth-code');

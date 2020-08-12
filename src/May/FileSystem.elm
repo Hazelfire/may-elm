@@ -21,6 +21,7 @@ module May.FileSystem exposing
     , needsSync
     , new
     , syncList
+    , syncListAll
     , taskParent
     , tasksInFolder
     , updateFS
@@ -616,3 +617,25 @@ syncList (FileSystem fs) =
 emptySyncList : FileSystem -> FileSystem
 emptySyncList (FileSystem fs) =
     FileSystem { fs | syncList = SyncList.empty }
+
+
+{-| This method sets the sync list to be "add all items currently in the system" to the syncList
+This is particularly useful when deleting a user remotely but not deleting their tasks locally.
+The next time they log in and create a user, their tasks get sent up again
+-}
+syncListAll : FileSystem -> FileSystem
+syncListAll (FileSystem fs) =
+    let
+        newSyncList =
+            List.map
+                (\x ->
+                    case x of
+                        FolderNode { parent, folder } ->
+                            SyncList.SyncUpdate <| SyncList.SyncUpdateFolder parent folder
+
+                        TaskNode { parent, task } ->
+                            SyncList.SyncUpdate <| SyncList.SyncUpdateTask parent task
+                )
+                fs.nodes
+    in
+    FileSystem { fs | syncList = newSyncList }
