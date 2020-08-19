@@ -108,16 +108,15 @@ newTaskView id =
 type Msg
     = CreateFolder (Id Folder)
     | GotAuthResponse (Result String Auth.AuthTokens)
-    | GotSubscriptionCheck (Result Http.Error Bool)
     | GotSubscriptionSessionId (Result Http.Error String)
     | GotNodes (Result Http.Error FileSystem.FSUpdate)
     | GotUpdateSuccess (Result Http.Error ())
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
-    | StartEditingTaskName
+    | StartEditingTaskName String
     | RequestSubscription
-    | StartEditingFolderName
+    | StartEditingFolderName String
     | StartEditingTaskDuration
     | ChangeFolderName String
     | ChangeTaskName String
@@ -286,11 +285,11 @@ update message model =
                 ViewIdTask tid ->
                     pure <| { model | viewing = newTaskView tid }
 
-        StartEditingFolderName ->
-            withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName "")))) model
+        StartEditingFolderName name ->
+            withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName name)))) model
 
-        StartEditingTaskName ->
-            withCommand (always (setFocus "taskname")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName "")))) model
+        StartEditingTaskName name ->
+            withCommand (always (setFocus "taskname")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName name)))) model
 
         SetFolderName fid name ->
             let
@@ -616,10 +615,19 @@ mapFolderView func model =
 view : Model -> Html Msg
 view model =
     let
+        now =
+            case model.currentTime of
+                Just time ->
+                    time
+
+                -- This should never really appear to the user, as this is only nothing in the instant the app is not loaded
+                Nothing ->
+                    Time.millisToPosix 0
+
         itemView =
             case model.viewing of
                 ViewTypeFolder folderView ->
-                    viewFolderDetails folderView model.fs
+                    viewFolderDetails now folderView model.fs
 
                 ViewTypeTask taskView ->
                     viewTaskDetails taskView model.fs
@@ -630,7 +638,7 @@ view model =
             NoNotice ->
                 div [ class "ui divided stackable grid" ]
                     [ div
-                        [ class "twelve wide column" ]
+                        [ class "left-padded twelve wide column" ]
                         [ viewStatistics model.currentTime (FileSystem.allTasks model.fs)
                         , itemView
                         ]
@@ -656,16 +664,16 @@ viewNotice notice =
                 , p [] [ text "Your current subscription with the service will be cancelled, and you will no longer get charged" ]
                 , p [] [ text "You will need to create a new account to get another subscription for this service" ]
                 , p [] [ text "Are you sure you want to delete your account?" ]
-                , button [ class "ui button", onClick CancelConfirmDeleteAccount ] [ text "No, go back" ]
-                , button [ class "ui button", onClick DeleteAccount ] [ text "Yes I'm sure. Delete my account" ]
+                , button [ class "ui green button", onClick CancelConfirmDeleteAccount ] [ text "No, go back" ]
+                , button [ class "ui red button", onClick DeleteAccount ] [ text "Yes I'm sure. Delete my account" ]
                 ]
 
         AskForSubscription ->
             div [ class "askforsubscription" ]
                 [ p [] [ text "Welcome to the May!" ]
-                , button [ class "ui button", onClick RequestSubscription ] [ text "Get Subscription" ]
+                , button [ class "ui green button", onClick RequestSubscription ] [ text "Get Subscription" ]
                 , p [] [ text "If you don't want a subscription, you don't need an account. Everything will still work offline" ]
-                , button [ class "ui button", onClick DeleteAccount ] [ text "Delete Account" ]
+                , button [ class "ui red button", onClick DeleteAccount ] [ text "Delete Account" ]
                 ]
 
 
@@ -697,32 +705,22 @@ viewHeader model =
                 _ ->
                     Auth.authStateToString model.authState
     in
-    nav [ class "ui menu" ]
+    nav [ class "ui purple inverted menu top-menu" ]
         [ a [ class "item" ] [ text "May" ]
         , ul [ class "right menu" ]
             (li [ class "item" ] [ text status ]
                 :: (case model.authState of
                         Auth.Authenticated _ ->
-                            [ li [ class "item" ]
-                                [ button [ class "ui button", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
-                                ]
-                            , li [ class "item" ]
-                                [ button
-                                    [ class "ui button"
-                                    , onClick Logout
-                                    ]
-                                    [ text "Logout" ]
-                                ]
+                            [ li [ class "item" ] [ button [ class "ui button red", onClick ConfirmDeleteAccount ] [ text "Delete Account" ] ]
+                            , li [ class "item" ] [ button [ class "ui button grey", onClick Logout ] [ text "Logout" ] ]
                             ]
 
                         _ ->
-                            [ li [ class "item" ]
-                                [ a
-                                    [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code&scopes=account.delete%20nodes.read%20nodes.write%20subscription.read%20account.delete"
-                                    , class "ui button"
-                                    ]
-                                    [ text "Login" ]
+                            [ a
+                                [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code&scopes=account.delete%20nodes.read%20nodes.write%20subscription.read%20account.delete"
+                                , class "item green"
                                 ]
+                                [ text "Login" ]
                             ]
                    )
             )
@@ -748,28 +746,28 @@ viewTodo nowM tasks =
 
                 sections =
                     if List.length labeledTasks.overdue > 0 then
-                        [ viewTodoSection "Overdue" (addDurations labeledTasks.overdue) ]
+                        [ viewTodoSection "red" "Overdue" (addDurations labeledTasks.overdue) ]
 
                     else
                         []
 
                 sectionsToday =
                     if List.length labeledTasks.doToday > 0 then
-                        viewTodoSection "Do Today" (addDurations labeledTasks.doToday) :: sections
+                        viewTodoSection "orange" "Do Today" (addDurations labeledTasks.doToday) :: sections
 
                     else
                         sections
 
                 sectionsSoon =
                     if List.length labeledTasks.doSoon > 0 then
-                        viewTodoSection "Do Soon" (mapJustSecond labeledTasks.doSoon) :: sectionsToday
+                        viewTodoSection "green" "Do Soon" (mapJustSecond labeledTasks.doSoon) :: sectionsToday
 
                     else
                         sectionsToday
 
                 allSections =
                     if List.length labeledTasks.doLater > 0 then
-                        viewTodoSection "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
+                        viewTodoSection "black" "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
 
                     else
                         sectionsSoon
@@ -781,21 +779,21 @@ viewTodo nowM tasks =
             div [] [ text "loading" ]
 
 
-viewTodoSection : String -> List ( Task, Maybe Float ) -> Html Msg
-viewTodoSection title tasks =
+viewTodoSection : String -> String -> List ( Task, Maybe Float ) -> Html Msg
+viewTodoSection color title tasks =
     let
         sortedTasks =
             List.sortBy (\( _, a ) -> -(Maybe.withDefault 0 a)) tasks
     in
     div []
-        (h3 [ class "ui header" ] [ text title ]
+        (h3 [ class <| "ui header " ++ color ] [ text title ]
             :: List.map
                 (\( task, urgency ) ->
                     let
                         label =
                             case urgency of
                                 Just u ->
-                                    showFloat u ++ ": "
+                                    showFloat u ++ " (" ++ String.fromInt (floor (u / Task.duration task * 100)) ++ "%): "
 
                                 Nothing ->
                                     ""
@@ -823,6 +821,24 @@ showFloat float =
     String.fromInt beforeDecimal ++ "." ++ afterDecimal
 
 
+showHours : Float -> String
+showHours float =
+    let
+        base =
+            round (float * 100)
+
+        beforeDecimal =
+            base // 100
+
+        afterDecimalInt =
+            floor <| (float - toFloat beforeDecimal) * 60
+
+        afterDecimal =
+            String.padLeft 2 '0' (String.fromInt afterDecimalInt)
+    in
+    String.fromInt beforeDecimal ++ ":" ++ afterDecimal
+
+
 tomorrow : Time.Posix -> Time.Posix
 tomorrow time =
     Time.millisToPosix (Time.posixToMillis time + 60 * 60 * 1000 * 24)
@@ -833,8 +849,8 @@ viewStatistics nowM tasks =
     case nowM of
         Just now ->
             div [ class "ui statistics" ]
-                [ viewStatistic "Urgency" (showFloat <| Statistics.urgency now tasks)
-                , viewStatistic "Tomorrow" (showFloat <| Statistics.urgency (tomorrow now) tasks)
+                [ viewStatistic "Urgency" (showHours <| Statistics.urgency now tasks)
+                , viewStatistic "Tomorrow" (showHours <| Statistics.urgency (tomorrow now) tasks)
                 ]
 
         Nothing ->
@@ -846,13 +862,13 @@ viewStatistic label value =
     div [ class "ui small statistic" ] [ div [ class "value" ] [ text value ], div [ class "label" ] [ text label ] ]
 
 
-viewButton : String -> msg -> Html msg
-viewButton name message =
-    button [ class "ui button", onClick message ] [ text name ]
+viewButton : String -> String -> msg -> Html msg
+viewButton color name message =
+    button [ class <| "ui button " ++ color, onClick message ] [ text name ]
 
 
-viewFolderDetails : FolderView -> FileSystem -> Html Msg
-viewFolderDetails folderView fs =
+viewFolderDetails : Time.Posix -> FolderView -> FileSystem -> Html Msg
+viewFolderDetails time folderView fs =
     let
         folderId =
             folderView.id
@@ -879,18 +895,18 @@ viewFolderDetails folderView fs =
                 [ text "My Tasks"
                 ]
             , div [ class "ui segment attached" ]
-                [ h3 [ class "ui header" ]
+                [ h3 [ class "ui header clearfix" ]
                     [ text "Folders"
-                    , viewButton "Add" (CreateFolder folderId)
+                    , viewButton "right floated primary" "Add" (CreateFolder folderId)
                     ]
-                , viewFolderList folderId fs
+                , viewFolderList time folderId fs
                 ]
             , div [ class "ui segment attached" ]
-                [ h3 [ class "ui header" ]
+                [ h3 [ class "ui header clearfix" ]
                     [ text "Tasks"
-                    , viewButton "Add" (CreateTask folderId)
+                    , viewButton "right floated primary" "Add" (CreateTask folderId)
                     ]
-                , viewTaskList folderId fs
+                , viewTaskList time folderId fs
                 ]
             ]
 
@@ -917,7 +933,7 @@ viewFolderDetails folderView fs =
                             , div [ class "actions" ]
                                 [ div [ class "ui black deny button", onClick CloseConfirmDeleteFolder ]
                                     [ text "Cancel" ]
-                                , div [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
+                                , button [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
                                 ]
                             ]
                         ]
@@ -925,24 +941,24 @@ viewFolderDetails folderView fs =
                       else
                         []
                      )
-                        ++ [ div [ class "ui header attached top" ]
-                                [ viewBackButton (FileSystem.folderParent folderId fs)
-                                , editableField editingName "foldername" nameText StartEditingFolderName ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
-                                , viewButton "Delete" ConfirmDeleteFolder
+                        ++ [ ul [ class "ui menu attached top" ]
+                                [ li [ class "item" ] [ viewBackButton (FileSystem.folderParent folderId fs) ]
+                                , li [ class "item header-name" ] [ editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId)) ]
+                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteFolder ] ]
                                 ]
                            , div [ class "ui segment attached" ]
-                                [ h3 [ class "ui header" ]
+                                [ h3 [ class "ui header clearfix" ]
                                     [ text "Folders"
-                                    , viewButton "Add" (CreateFolder folderId)
+                                    , viewButton "right floated primary" "Add" (CreateFolder folderId)
                                     ]
-                                , viewFolderList folderId fs
+                                , viewFolderList time folderId fs
                                 ]
                            , div [ class "ui segment attached" ]
-                                [ h3 [ class "ui header" ]
+                                [ h3 [ class "ui header clearfix" ]
                                     [ text "Tasks"
-                                    , viewButton "Add" (CreateTask folderId)
+                                    , viewButton "right floated primary" "Add" (CreateTask folderId)
                                     ]
-                                , viewTaskList folderId fs
+                                , viewTaskList time folderId fs
                                 ]
                            ]
                     )
@@ -1019,10 +1035,10 @@ viewTaskDetails taskView fs =
                   else
                     []
                  )
-                    ++ [ div [ class "ui header attached top" ]
-                            [ viewBackButton (FileSystem.taskParent taskId fs)
-                            , editableField editingName "taskname" nameText StartEditingTaskName ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
-                            , viewButton "Delete" ConfirmDeleteTask
+                    ++ [ ul [ class "ui menu attached top" ]
+                            [ li [ class "item" ] [ viewBackButton (FileSystem.taskParent taskId fs) ]
+                            , li [ class "item header-name" ] [ editableField editingName "taskname" nameText (StartEditingTaskName nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId)) ]
+                            , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteTask ] ]
                             ]
                        , div [ class "ui segment attached" ]
                             [ div [ class "durationtitle" ] [ text "Duration" ]
@@ -1115,22 +1131,34 @@ viewBackButton parentId =
             button [ class "ui button aligned left disabled" ] [ text "Back" ]
 
 
-viewFolderList : Id Folder -> FileSystem -> Html Msg
-viewFolderList folderId fs =
+viewFolderList : Time.Posix -> Id Folder -> FileSystem -> Html Msg
+viewFolderList time folderId fs =
     let
         childrenFolders =
             FileSystem.foldersInFolder folderId fs
+
+        taskLabels =
+            Statistics.labelTasks time (FileSystem.allTasks fs)
+
+        labeledFolders =
+            List.map (\folder -> ( folder, Statistics.folderLabelWithId taskLabels (Folder.id folder) fs )) childrenFolders
     in
-    viewCards (List.map viewFolderCard childrenFolders)
+    viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
 
 
-viewTaskList : Id Folder -> FileSystem -> Html Msg
-viewTaskList folderId fs =
+viewTaskList : Time.Posix -> Id Folder -> FileSystem -> Html Msg
+viewTaskList time folderId fs =
     let
         childrenTasks =
             FileSystem.tasksInFolder folderId fs
+
+        taskLabels =
+            Statistics.labelTasks time (FileSystem.allTasks fs)
+
+        labeledTasks =
+            List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) childrenTasks
     in
-    viewCards (List.map viewTaskCard childrenTasks)
+    viewCards (List.map (\( task, label ) -> viewTaskCard label task) labeledTasks)
 
 
 viewCards : List (Html Msg) -> Html Msg
@@ -1143,13 +1171,29 @@ viewIcon icon =
     i [ class <| "icon " ++ icon ] []
 
 
-viewFolderCard : Folder -> Html Msg
-viewFolderCard folder =
+labelToColor : Statistics.Label -> String
+labelToColor label =
+    case label of
+        Statistics.Overdue ->
+            "red"
+
+        Statistics.DoToday ->
+            "orange"
+
+        Statistics.DoSoon ->
+            "green"
+
+        Statistics.DoLater ->
+            "black"
+
+
+viewFolderCard : Statistics.Label -> Folder -> Html Msg
+viewFolderCard label folder =
     a [ class "ui card", onClick (SetView (ViewIdFolder (Folder.id folder))) ]
-        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon "folder", text (Folder.name folder) ] ] ]
+        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ] ] ]
 
 
-viewTaskCard : Task -> Html Msg
-viewTaskCard task =
+viewTaskCard : Statistics.Label -> Task -> Html Msg
+viewTaskCard label task =
     a [ class "ui card", onClick (SetView (ViewIdTask (Task.id task))) ]
-        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon "tasks", text (Task.name task) ] ] ]
+        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon <| "tasks " ++ labelToColor label, text (Task.name task) ] ] ]

@@ -1,5 +1,19 @@
-module May.Statistics exposing (bait, labelTasks, taskUrgency, todo, urgency, velocity)
+module May.Statistics exposing
+    ( Label(..)
+    , LabeledTasks
+    , bait
+    , folderLabelWithId
+    , labelTasks
+    , taskLabelWithId
+    , taskUrgency
+    , todo
+    , urgency
+    , velocity
+    )
 
+import May.FileSystem as FileSystem exposing (FileSystem)
+import May.Folder as Folder exposing (Folder)
+import May.Id exposing (Id)
 import May.Task as Task exposing (Task)
 import Time
 
@@ -137,6 +151,56 @@ labelTasks_ now last_due residual currentUrgency tasks =
             , doSoon = []
             , overdue = []
             }
+
+
+type Label
+    = Overdue
+    | DoToday
+    | DoSoon
+    | DoLater
+
+
+taskLabelWithId : LabeledTasks -> Id Task -> Label
+taskLabelWithId taskLabels taskId =
+    if List.any (Task.id >> (==) taskId) taskLabels.overdue then
+        Overdue
+
+    else if List.any (Task.id >> (==) taskId) taskLabels.doToday then
+        DoToday
+
+    else if List.any (Tuple.first >> Task.id >> (==) taskId) taskLabels.doSoon then
+        DoSoon
+
+    else
+        DoLater
+
+
+folderLabelWithId : LabeledTasks -> Id Folder -> FileSystem -> Label
+folderLabelWithId taskLabels folderId fs =
+    let
+        taskHasParent =
+            Task.id
+                >> (\x -> FileSystem.taskParent x fs)
+                >> (\x ->
+                        case x of
+                            Just y ->
+                                FileSystem.folderHasAncestor y folderId fs
+
+                            Nothing ->
+                                False
+                   )
+    in
+    if List.any taskHasParent taskLabels.overdue then
+        Overdue
+
+    else if List.any taskHasParent taskLabels.doToday then
+        DoToday
+
+    else if List.any (Tuple.first >> taskHasParent) taskLabels.doSoon then
+        DoSoon
+
+    else
+        DoLater
 
 
 

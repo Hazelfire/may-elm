@@ -10,6 +10,7 @@ module May.FileSystem exposing
     , deleteTask
     , emptySyncList
     , encode
+    , folderHasAncestor
     , folderParent
     , foldersInFolder
     , fsUpdateDecoder
@@ -639,3 +640,20 @@ syncListAll (FileSystem fs) =
                 fs.nodes
     in
     FileSystem { fs | syncList = newSyncList }
+
+
+folderHasAncestor : Id Folder -> Id Folder -> FileSystem -> Bool
+folderHasAncestor folder looking fs =
+    if folder == looking then
+        True
+
+    else if folder == Id.rootId then
+        False
+
+    else
+        case folderParent folder fs of
+            Just parent ->
+                folderHasAncestor parent looking fs
+
+            Nothing ->
+                False

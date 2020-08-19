@@ -87,3 +87,21 @@ body {
 .editablefield {
   width: 100%;
 }
+
+.top-menu {
+  border-radius: 0px !important;
+}
+.menu {
+  padding-left: 0px;
+}
+.header-name {
+  flex: 1 !important;
+}
+.clearfix::after {
+  content: "";
+  clear: both;
+  display: table;
+}
+.left-padded {
+  padding-left : 2em !important;
+}

@@ -99,6 +99,7 @@ type alias AuthTokensInternal =
     { idToken : String
     , idTokenPayload : IdToken
     , accessToken : String
+    , accessTokenPayload : AccessToken
     , refreshToken : String
     , expiresAt : Time.Posix
     }
@@ -119,13 +120,27 @@ decodeIdToken =
         (D.field "name" D.string)
 
 
+type alias AccessToken =
+    { groups : List String
+    , sub : String
+    }
+
+
+decodeAccessToken : D.Decoder AccessToken
+decodeAccessToken =
+    D.map2 AccessToken
+        (D.field "cognito:groups" (D.list D.string))
+        (D.field "sub" D.string)
+
+
 tokensDecoder : D.Decoder AuthTokens
 tokensDecoder =
     D.map AuthTokens <|
-        D.map5 AuthTokensInternal
+        D.map6 AuthTokensInternal
             (D.field "id_token" D.string)
             (D.field "id_token" (Jwt.tokenDecoder decodeIdToken))
             (D.field "access_token" D.string)
+            (D.field "access_token" (Jwt.tokenDecoder decodeAccessToken))
             (D.field "refresh_token" D.string)
             (D.field "expires_at" (D.map Time.millisToPosix D.int))
 
@@ -149,6 +164,7 @@ type alias AuthTokensResponse =
     { idToken : String
     , idTokenPayload : IdToken
     , accessToken : String
+    , accessTokenPayload : AccessToken
     , refreshToken : String
     , expiresIn : Int
     }
@@ -156,10 +172,11 @@ type alias AuthTokensResponse =
 
 authTokenResponseDecoder : D.Decoder AuthTokensResponse
 authTokenResponseDecoder =
-    D.map5 AuthTokensResponse
+    D.map6 AuthTokensResponse
         (D.field "id_token" D.string)
         (D.field "id_token" (Jwt.tokenDecoder decodeIdToken))
         (D.field "access_token" D.string)
+        (D.field "access_token" (Jwt.tokenDecoder decodeAccessToken))
         (D.field "refresh_token" D.string)
         (D.field "expires_in" D.int)
 
@@ -192,6 +209,7 @@ authResponseToAuthTokens time response =
         , idToken = response.idToken
         , idTokenPayload = response.idTokenPayload
         , accessToken = response.accessToken
+        , accessTokenPayload = response.accessTokenPayload
         , refreshToken = response.refreshToken
         }
 
@@ -245,9 +263,49 @@ refreshTokenBody (AuthTokens { refreshToken }) =
 refreshTokens : (Result String AuthTokens -> a) -> AuthTokens -> Cmd a
 refreshTokens message tokens =
     Task.attempt message <|
-        (getTokenTask (refreshTokenBody tokens)
+        (getRefreshTokenTask tokens
             |> Task.andThen authResponseToAuthTokensTask
         )
+
+
+{-| The refresh token task doesn't actually have a refresh token in the response
+so I need to handle it a bit differently
+-}
+getRefreshTokenTask : AuthTokens -> Task String AuthTokensResponse
+getRefreshTokenTask tokens =
+    Http.task
+        { url = authBase ++ "/oauth2/token"
+        , method = "POST"
+        , body = Http.stringBody "application/x-www-form-urlencoded" (refreshTokenBody tokens)
+        , headers = []
+        , timeout = Nothing
+        , resolver =
+            Http.stringResolver
+                (\response ->
+                    case response of
+                        Http.GoodStatus_ _ string ->
+                            case D.decodeString (refreshTokenDecoder tokens) string of
+                                Err error ->
+                                    Result.Err <| D.errorToString error
+
+                                Ok result ->
+                                    Ok result
+
+                        _ ->
+                            Result.Err "Could not access web"
+                )
+        }
+
+
+refreshTokenDecoder : AuthTokens -> D.Decoder AuthTokensResponse
+refreshTokenDecoder (AuthTokens { refreshToken }) =
+    D.map6 AuthTokensResponse
+        (D.field "id_token" D.string)
+        (D.field "id_token" (Jwt.tokenDecoder decodeIdToken))
+        (D.field "access_token" D.string)
+        (D.field "access_token" (Jwt.tokenDecoder decodeAccessToken))
+        (D.succeed refreshToken)
+        (D.field "expires_in" D.int)
 
 
 authTokenNeedsRefresh : Time.Posix -> AuthTokens -> Bool
