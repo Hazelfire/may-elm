@@ -11,6 +11,7 @@
     "lighthouse": "^6.1.1"
   },
   "devDependencies": {
+    "@dillonkearns/elm-graphql": "^4.0.3",
     "@elm-tooling/elm-language-server": "^1.9.1"
   },
   "scripts": {

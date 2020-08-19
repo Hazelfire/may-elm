@@ -8,6 +8,7 @@ module May.Auth exposing
     , email
     , encodeTokens
     , exchangeAuthCode
+    , hasSubscription
     , name
     , refreshTokens
     , stateAuthTokens
@@ -29,7 +30,6 @@ import Time
 type AuthState
     = Unauthenticated
     | Authenticating
-    | CheckingSubscription AuthTokens
     | AuthFailed
     | Authenticated AuthTokens
     | SubscriptionNeeded AuthTokens
@@ -41,9 +41,6 @@ type AuthState
 stateAuthTokens : AuthState -> Maybe AuthTokens
 stateAuthTokens state =
     case state of
-        CheckingSubscription x ->
-            Just x
-
         Authenticated x ->
             Just x
 
@@ -68,9 +65,6 @@ authStateToString state =
 
         Authenticating ->
             "Authenticating..."
-
-        CheckingSubscription _ ->
-            "Checking Subscription"
 
         AuthFailed ->
             "Auth Failed"
@@ -334,3 +328,8 @@ email (AuthTokens { idTokenPayload }) =
 name : AuthTokens -> String
 name (AuthTokens { idTokenPayload }) =
     idTokenPayload.name
+
+
+hasSubscription : AuthTokens -> Bool
+hasSubscription (AuthTokens { accessTokenPayload }) =
+    List.member "Subscribers" accessTokenPayload.groups

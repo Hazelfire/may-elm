@@ -184,35 +184,28 @@ init flagsValue =
     case D.decodeValue flagDecoder flagsValue of
         Ok flags ->
             let
-                authState =
-                    case ( flags.authCode, flags.authTokens ) of
-                        ( Just _, _ ) ->
-                            Auth.Authenticating
-
-                        ( _, Just tokens ) ->
-                            Auth.CheckingSubscription tokens
-
-                        _ ->
-                            Auth.Unauthenticated
-
                 initModel =
                     { fs = flags.fs
                     , viewing = ViewTypeFolder { id = FileSystem.getRootId flags.fs, editing = NotEditingFolder }
                     , currentTime = Nothing
-                    , authState = authState
+                    , authState = Auth.Unauthenticated
                     , syncStatus = SyncOffline
                     , notice = NoNotice
                     }
             in
             case ( flags.authCode, flags.authTokens ) of
-                ( Just code, _ ) ->
-                    ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, Auth.exchangeAuthCode GotAuthResponse code ] )
+                ( Just authCode, _ ) ->
+                    ( { initModel | authState = Auth.Authenticating }, Cmd.batch [ Time.now |> Task.perform SetTime, Auth.exchangeAuthCode GotAuthResponse authCode ] )
 
                 ( _, Just tokens ) ->
-                    ( initModel, Cmd.batch [ Time.now |> Task.perform SetTime, checkSubscription tokens ] )
+                    if Auth.hasSubscription tokens then
+                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch [ Time.now |> Task.perform SetTime, requestNodes tokens ] )
+
+                    else
+                        pure { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }
 
                 _ ->
-                    ( initModel, Time.now |> Task.perform SetTime )
+                    ( { initModel | authState = Auth.Authenticating }, Time.now |> Task.perform SetTime )
 
         Err _ ->
             let
@@ -378,30 +371,15 @@ update message model =
             pure <| { model | authState = Auth.AuthFailed }
 
         GotAuthResponse (Ok response) ->
-            let
-                ( newModel, command ) =
-                    saveToLocalStorage { model | authState = Auth.CheckingSubscription response }
-            in
-            ( newModel, Cmd.batch [ command, checkSubscription response ] )
+            if Auth.hasSubscription response then
+                let
+                    ( newModel, command ) =
+                        saveToLocalStorage { model | authState = Auth.Authenticated response, syncStatus = Retreiving }
+                in
+                ( newModel, Cmd.batch [ command, requestNodes response ] )
 
-        GotSubscriptionCheck (Err _) ->
-            pure <| { model | authState = Auth.AuthFailed }
-
-        GotSubscriptionCheck (Ok False) ->
-            case Auth.stateAuthTokens model.authState of
-                Just authResponse ->
-                    pure <| { model | authState = Auth.SubscriptionNeeded authResponse, notice = AskForSubscription }
-
-                _ ->
-                    pure model
-
-        GotSubscriptionCheck (Ok True) ->
-            case Auth.stateAuthTokens model.authState of
-                Just authResponse ->
-                    ( { model | authState = Auth.Authenticated authResponse, syncStatus = Retreiving }, requestNodes authResponse )
-
-                _ ->
-                    pure model
+            else
+                saveToLocalStorage <| { model | authState = Auth.SubscriptionNeeded response, notice = AskForSubscription }
 
         RequestSubscription ->
             case Auth.stateAuthTokens model.authState of
@@ -517,26 +495,6 @@ requestSubscription tokens =
         , timeout = Nothing
         , tracker = Nothing
         , expect = Http.expectJson GotSubscriptionSessionId D.string
-        }
-
-
-checkSubscription : Auth.AuthTokens -> Cmd Msg
-checkSubscription tokens =
-    let
-        email =
-            Auth.email tokens
-
-        name =
-            Auth.name tokens
-    in
-    Http.request
-        { url = backendBase ++ "/subscription"
-        , method = "POST"
-        , body = Http.stringBody "application/json" (E.encode 0 (E.object [ ( "name", E.string name ), ( "email", E.string email ) ]))
-        , headers = [ Auth.authHeader tokens ]
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectJson GotSubscriptionCheck D.bool
         }
 
 
