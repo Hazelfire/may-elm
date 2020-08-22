@@ -8,8 +8,8 @@ import Api.InputObject
 import Api.Interface
 import Api.Object
 import Api.Scalar
-import Api.ScalarCodecs
 import Api.Union
+import CustomScalarCodecs
 import Graphql.Internal.Builder.Argument as Argument exposing (Argument)
 import Graphql.Internal.Builder.Object as Object
 import Graphql.Internal.Encode as Encode exposing (Value)
@@ -19,9 +19,9 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-id : SelectionSet Api.ScalarCodecs.Id Api.Object.Task
+id : SelectionSet CustomScalarCodecs.Id Api.Object.Task
 id =
-    Object.selectionForField "ScalarCodecs.Id" "id" [] (Api.ScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
+    Object.selectionForField "CustomScalarCodecs.Id" "id" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
 name : SelectionSet String Api.Object.Task
@@ -29,16 +29,21 @@ name =
     Object.selectionForField "String" "name" [] Decode.string
 
 
-due : SelectionSet (Maybe Int) Api.Object.Task
+due : SelectionSet (Maybe CustomScalarCodecs.PosixTime) Api.Object.Task
 due =
-    Object.selectionForField "(Maybe Int)" "due" [] (Decode.int |> Decode.nullable)
+    Object.selectionForField "(Maybe CustomScalarCodecs.PosixTime)" "due" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecPosixTime |> .decoder |> Decode.nullable)
 
 
-pid : SelectionSet Api.ScalarCodecs.Id Api.Object.Task
-pid =
-    Object.selectionForField "ScalarCodecs.Id" "pid" [] (Api.ScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
+parent : SelectionSet CustomScalarCodecs.Id Api.Object.Task
+parent =
+    Object.selectionForField "CustomScalarCodecs.Id" "parent" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
-duration : SelectionSet Int Api.Object.Task
+duration : SelectionSet Float Api.Object.Task
 duration =
-    Object.selectionForField "Int" "duration" [] Decode.int
+    Object.selectionForField "Float" "duration" [] Decode.float
+
+
+doneOn : SelectionSet (Maybe CustomScalarCodecs.PosixTime) Api.Object.Task
+doneOn =
+    Object.selectionForField "(Maybe CustomScalarCodecs.PosixTime)" "doneOn" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecPosixTime |> .decoder |> Decode.nullable)

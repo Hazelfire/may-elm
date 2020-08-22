@@ -2,7 +2,7 @@
 -- https://github.com/dillonkearns/elm-graphql
 
 
-module Api.Object.Me exposing (..)
+module Api.Object.PatchNodeResponse exposing (..)
 
 import Api.InputObject
 import Api.Interface
@@ -19,8 +19,6 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-nodes :
-    SelectionSet decodesTo Api.Union.Node
-    -> SelectionSet (List decodesTo) Api.Object.Me
-nodes object_ =
-    Object.selectionForCompositeField "nodes" [] object_ (identity >> Decode.list)
+ok : SelectionSet Bool Api.Object.PatchNodeResponse
+ok =
+    Object.selectionForField "Bool" "ok" [] Decode.bool

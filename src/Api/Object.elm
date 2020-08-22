@@ -13,5 +13,9 @@ type Me
     = Me
 
 
+type PatchNodeResponse
+    = PatchNodeResponse
+
+
 type Task
     = Task

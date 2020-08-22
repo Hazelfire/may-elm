@@ -16,6 +16,7 @@ port module TodoList exposing
 
 import Browser
 import Date
+import Graphql.Http
 import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, li, nav, p, span, text, ul)
 import Html.Attributes exposing (checked, class, href, id, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
@@ -39,6 +40,7 @@ type alias Model =
     { fs : FileSystem
     , viewing : ViewType
     , currentTime : Maybe Time.Posix
+    , currentZone : Maybe Time.Zone
     , authState : Auth.AuthState
     , syncStatus : SyncStatus
     , notice : Notice
@@ -109,8 +111,8 @@ type Msg
     = CreateFolder (Id Folder)
     | GotAuthResponse (Result String Auth.AuthTokens)
     | GotSubscriptionSessionId (Result Http.Error String)
-    | GotNodes (Result Http.Error FileSystem.FSUpdate)
-    | GotUpdateSuccess (Result Http.Error ())
+    | GotNodes (Result (Graphql.Http.Error FileSystem.FSUpdate) FileSystem.FSUpdate)
+    | GotUpdateSuccess (Result (Graphql.Http.Error Bool) Bool)
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
@@ -126,8 +128,10 @@ type Msg
     | SetTaskDuration (Id Task) Float
     | SetTaskDueNow (Id Task)
     | SetTaskDue (Id Task) (Maybe Time.Posix)
+    | SetTaskDoneOn (Id Task) (Maybe Time.Posix)
     | SetView ViewId
     | SetTime Time.Posix
+    | SetZone Time.Zone
     | ConfirmDeleteFolder
     | CloseConfirmDeleteFolder
     | DeleteFolder (Id Folder)
@@ -181,6 +185,12 @@ encodeFlags flags =
 -}
 init : E.Value -> ( Model, Cmd Msg )
 init flagsValue =
+    let
+        requiredActions =
+            [ Time.now |> Task.perform SetTime
+            , Time.here |> Task.perform SetZone
+            ]
+    in
     case D.decodeValue flagDecoder flagsValue of
         Ok flags ->
             let
@@ -191,21 +201,22 @@ init flagsValue =
                     , authState = Auth.Unauthenticated
                     , syncStatus = SyncOffline
                     , notice = NoNotice
+                    , currentZone = Nothing
                     }
             in
             case ( flags.authCode, flags.authTokens ) of
                 ( Just authCode, _ ) ->
-                    ( { initModel | authState = Auth.Authenticating }, Cmd.batch [ Time.now |> Task.perform SetTime, Auth.exchangeAuthCode GotAuthResponse authCode ] )
+                    ( { initModel | authState = Auth.Authenticating }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
 
                 ( _, Just tokens ) ->
                     if Auth.hasSubscription tokens then
-                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch [ Time.now |> Task.perform SetTime, requestNodes tokens ] )
+                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
 
                     else
-                        pure { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }
+                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch requiredActions )
 
                 _ ->
-                    ( { initModel | authState = Auth.Authenticating }, Time.now |> Task.perform SetTime )
+                    ( initModel, Cmd.batch requiredActions )
 
         Err _ ->
             let
@@ -220,9 +231,10 @@ init flagsValue =
                         , authState = Auth.Unauthenticated
                         , syncStatus = SyncOffline
                         , notice = NoNotice
+                        , currentZone = Nothing
                         }
             in
-            ( model, Cmd.batch [ command, Time.now |> Task.perform SetTime ] )
+            ( model, Cmd.batch (command :: requiredActions) )
 
 
 pure : a -> ( a, Cmd msg )
@@ -253,6 +265,9 @@ update message model =
 
         NewTask parentId taskId ->
             saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
+
+        SetZone zone ->
+            pure <| { model | currentZone = Just zone }
 
         SetTime time ->
             let
@@ -319,6 +334,9 @@ update message model =
 
         SetTaskDue tid due ->
             saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
+
+        SetTaskDoneOn tid doneOn ->
+            saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDoneOn doneOn)) model
 
         SetTaskDueNow tid ->
             ( model, Time.now |> Task.perform (addWeek >> Just >> SetTaskDue tid) )
@@ -399,10 +417,32 @@ update message model =
             case Auth.stateAuthTokens model.authState of
                 Just authResponse ->
                     let
+                        needsSync =
+                            FileSystem.needsSync model.fs
+
                         ( newModel, command ) =
-                            saveToLocalStorage { model | fs = FileSystem.updateFS fsUpdate model.fs, syncStatus = Updating }
+                            saveToLocalStorage
+                                { model
+                                    | fs = FileSystem.updateFS fsUpdate model.fs
+                                    , syncStatus =
+                                        if needsSync then
+                                            Updating
+
+                                        else
+                                            Synced
+                                }
                     in
-                    ( newModel, Cmd.batch [ command, sendSyncList authResponse (FileSystem.syncList model.fs) ] )
+                    ( newModel
+                    , Cmd.batch
+                        (command
+                            :: (if needsSync then
+                                    [ sendSyncList authResponse (FileSystem.syncList model.fs) ]
+
+                                else
+                                    []
+                               )
+                        )
+                    )
 
                 _ ->
                     pure model
@@ -461,28 +501,18 @@ backendBase =
 
 sendSyncList : Auth.AuthTokens -> SyncList -> Cmd Msg
 sendSyncList tokens synclist =
-    Http.request
-        { url = backendBase ++ "/nodes"
-        , method = "PATCH"
-        , body = Http.stringBody "application/json" (E.encode 0 (SyncList.encode synclist))
-        , headers = [ Auth.authHeader tokens ]
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectWhatever GotUpdateSuccess
-        }
+    SyncList.syncListMutation synclist
+        |> Graphql.Http.mutationRequest "http://localhost:3000/"
+        |> Auth.withGqlAuthHeader tokens
+        |> Graphql.Http.send GotUpdateSuccess
 
 
 requestNodes : Auth.AuthTokens -> Cmd Msg
 requestNodes tokens =
-    Http.request
-        { url = backendBase ++ "/nodes"
-        , method = "GET"
-        , body = Http.emptyBody
-        , headers = [ Auth.authHeader tokens ]
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectJson GotNodes FileSystem.fsUpdateDecoder
-        }
+    FileSystem.updateSelectionSet
+        |> Graphql.Http.queryRequest "http://localhost:3000/"
+        |> Auth.withGqlAuthHeader tokens
+        |> Graphql.Http.send GotNodes
 
 
 requestSubscription : Auth.AuthTokens -> Cmd Msg
@@ -508,13 +538,33 @@ saveToLocalStorageAndUpdate model =
     case Auth.stateAuthTokens model.authState of
         Just tokens ->
             let
+                needsSync =
+                    FileSystem.needsSync model.fs
+
                 sendSyncLists =
                     sendSyncList tokens (FileSystem.syncList model.fs)
 
                 ( newModel, command ) =
                     saveToLocalStorage model
             in
-            ( { newModel | syncStatus = Updating }, Cmd.batch [ command, sendSyncLists ] )
+            ( { newModel
+                | syncStatus =
+                    if needsSync then
+                        Updating
+
+                    else
+                        Synced
+              }
+            , Cmd.batch
+                (command
+                    :: (if needsSync then
+                            [ sendSyncLists ]
+
+                        else
+                            []
+                       )
+                )
+            )
 
         Nothing ->
             saveToLocalStorage model
@@ -572,40 +622,36 @@ mapFolderView func model =
 
 view : Model -> Html Msg
 view model =
-    let
-        now =
-            case model.currentTime of
-                Just time ->
-                    time
+    case ( model.currentZone, model.currentTime ) of
+        ( Just here, Just now ) ->
+            let
+                itemView =
+                    case model.viewing of
+                        ViewTypeFolder folderView ->
+                            viewFolderDetails here now folderView model.fs
 
-                -- This should never really appear to the user, as this is only nothing in the instant the app is not loaded
-                Nothing ->
-                    Time.millisToPosix 0
+                        ViewTypeTask taskView ->
+                            viewTaskDetails now taskView model.fs
+            in
+            div []
+                [ viewHeader model
+                , case model.notice of
+                    NoNotice ->
+                        div [ class "ui divided stackable grid" ]
+                            [ div
+                                [ class "left-padded twelve wide column" ]
+                                [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
+                                , itemView
+                                ]
+                            , div [ class "four wide column" ] [ viewTodo model.currentZone model.currentTime (FileSystem.allTasks model.fs) ]
+                            ]
 
-        itemView =
-            case model.viewing of
-                ViewTypeFolder folderView ->
-                    viewFolderDetails now folderView model.fs
+                    _ ->
+                        viewNotice model.notice
+                ]
 
-                ViewTypeTask taskView ->
-                    viewTaskDetails taskView model.fs
-    in
-    div []
-        [ viewHeader model
-        , case model.notice of
-            NoNotice ->
-                div [ class "ui divided stackable grid" ]
-                    [ div
-                        [ class "left-padded twelve wide column" ]
-                        [ viewStatistics model.currentTime (FileSystem.allTasks model.fs)
-                        , itemView
-                        ]
-                    , div [ class "four wide column" ] [ viewTodo model.currentTime (FileSystem.allTasks model.fs) ]
-                    ]
-
-            _ ->
-                viewNotice model.notice
-        ]
+        _ ->
+            div [] [ text "loading" ]
 
 
 viewNotice : Notice -> Html Msg
@@ -685,13 +731,13 @@ viewHeader model =
         ]
 
 
-viewTodo : Maybe Time.Posix -> List Task -> Html Msg
-viewTodo nowM tasks =
-    case nowM of
-        Just now ->
+viewTodo : Maybe Time.Zone -> Maybe Time.Posix -> List Task -> Html Msg
+viewTodo hereM nowM tasks =
+    case ( hereM, nowM ) of
+        ( Just here, Just now ) ->
             let
                 labeledTasks =
-                    Statistics.labelTasks now tasks
+                    Statistics.labelTasks here now tasks
 
                 addDurations =
                     List.map (\x -> ( x, Just (Task.duration x) ))
@@ -723,9 +769,19 @@ viewTodo nowM tasks =
                     else
                         sectionsToday
 
-                allSections =
+                sectionsDoLater =
                     if List.length labeledTasks.doLater > 0 then
-                        viewTodoSection "black" "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
+                        viewTodoSection "blue" "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
+
+                    else
+                        sectionsSoon
+
+                doneToday =
+                    Statistics.doneToday here now tasks
+
+                allSections =
+                    if List.length doneToday > 0 then
+                        viewTodoSection "black" "Done today" (addDurations doneToday) :: sectionsDoLater
 
                     else
                         sectionsSoon
@@ -733,7 +789,7 @@ viewTodo nowM tasks =
             div [ class "todo" ]
                 (List.reverse allSections)
 
-        Nothing ->
+        _ ->
             div [] [ text "loading" ]
 
 
@@ -751,7 +807,7 @@ viewTodoSection color title tasks =
                         label =
                             case urgency of
                                 Just u ->
-                                    showFloat u ++ " (" ++ String.fromInt (floor (u / Task.duration task * 100)) ++ "%): "
+                                    showHours u ++ " (" ++ String.fromInt (floor (u / Task.duration task * 100)) ++ "%): "
 
                                 Nothing ->
                                     ""
@@ -762,21 +818,6 @@ viewTodoSection color title tasks =
                 )
                 sortedTasks
         )
-
-
-showFloat : Float -> String
-showFloat float =
-    let
-        base =
-            round (float * 100)
-
-        beforeDecimal =
-            base // 100
-
-        afterDecimal =
-            String.padLeft 2 '0' (String.fromInt (modBy 100 base))
-    in
-    String.fromInt beforeDecimal ++ "." ++ afterDecimal
 
 
 showHours : Float -> String
@@ -802,16 +843,17 @@ tomorrow time =
     Time.millisToPosix (Time.posixToMillis time + 60 * 60 * 1000 * 24)
 
 
-viewStatistics : Maybe Time.Posix -> List Task -> Html Msg
-viewStatistics nowM tasks =
-    case nowM of
-        Just now ->
+viewStatistics : Maybe Time.Zone -> Maybe Time.Posix -> List Task -> Html Msg
+viewStatistics hereM nowM tasks =
+    case ( hereM, nowM ) of
+        ( Just here, Just now ) ->
             div [ class "ui statistics" ]
-                [ viewStatistic "Urgency" (showHours <| Statistics.urgency now tasks)
-                , viewStatistic "Tomorrow" (showHours <| Statistics.urgency (tomorrow now) tasks)
+                [ viewStatistic "Done today" (showHours <| List.sum (List.map Task.duration (Statistics.doneToday here now tasks)))
+                , viewStatistic "Urgency" (showHours <| Statistics.urgency here now tasks)
+                , viewStatistic "Tomorrow" (showHours <| Statistics.urgency here (tomorrow now) tasks)
                 ]
 
-        Nothing ->
+        _ ->
             div [] [ text "Loading" ]
 
 
@@ -825,8 +867,8 @@ viewButton color name message =
     button [ class <| "ui button " ++ color, onClick message ] [ text name ]
 
 
-viewFolderDetails : Time.Posix -> FolderView -> FileSystem -> Html Msg
-viewFolderDetails time folderView fs =
+viewFolderDetails : Time.Zone -> Time.Posix -> FolderView -> FileSystem -> Html Msg
+viewFolderDetails here time folderView fs =
     let
         folderId =
             folderView.id
@@ -857,14 +899,14 @@ viewFolderDetails time folderView fs =
                     [ text "Folders"
                     , viewButton "right floated primary" "Add" (CreateFolder folderId)
                     ]
-                , viewFolderList time folderId fs
+                , viewFolderList here time folderId fs
                 ]
             , div [ class "ui segment attached" ]
                 [ h3 [ class "ui header clearfix" ]
                     [ text "Tasks"
                     , viewButton "right floated primary" "Add" (CreateTask folderId)
                     ]
-                , viewTaskList time folderId fs
+                , viewTaskList here time folderId fs
                 ]
             ]
 
@@ -909,14 +951,14 @@ viewFolderDetails time folderView fs =
                                     [ text "Folders"
                                     , viewButton "right floated primary" "Add" (CreateFolder folderId)
                                     ]
-                                , viewFolderList time folderId fs
+                                , viewFolderList here time folderId fs
                                 ]
                            , div [ class "ui segment attached" ]
                                 [ h3 [ class "ui header clearfix" ]
                                     [ text "Tasks"
                                     , viewButton "right floated primary" "Add" (CreateTask folderId)
                                     ]
-                                , viewTaskList time folderId fs
+                                , viewTaskList here time folderId fs
                                 ]
                            ]
                     )
@@ -925,8 +967,8 @@ viewFolderDetails time folderView fs =
                 div [ class "ui header attached top" ] [ text "Could not find folder" ]
 
 
-viewTaskDetails : TaskView -> FileSystem -> Html Msg
-viewTaskDetails taskView fs =
+viewTaskDetails : Time.Posix -> TaskView -> FileSystem -> Html Msg
+viewTaskDetails now taskView fs =
     let
         taskId =
             taskView.id
@@ -996,7 +1038,23 @@ viewTaskDetails taskView fs =
                     ++ [ ul [ class "ui menu attached top" ]
                             [ li [ class "item" ] [ viewBackButton (FileSystem.taskParent taskId fs) ]
                             , li [ class "item header-name" ] [ editableField editingName "taskname" nameText (StartEditingTaskName nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId)) ]
-                            , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteTask ] ]
+                            , ul [ class "right menu" ]
+                                [ li [ class "item" ]
+                                    [ case Task.doneOn task of
+                                        Nothing ->
+                                            div [ class "ui read-only checkbox" ]
+                                                [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) (Just now)), checked False ] []
+                                                , label [] [ text "Complete" ]
+                                                ]
+
+                                        Just _ ->
+                                            div [ class "ui checked read-only checkbox" ]
+                                                [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) Nothing), checked True ] []
+                                                , label [] [ text "Complete" ]
+                                                ]
+                                    ]
+                                , li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteTask ]
+                                ]
                             ]
                        , div [ class "ui segment attached" ]
                             [ div [ class "durationtitle" ] [ text "Duration" ]
@@ -1089,14 +1147,14 @@ viewBackButton parentId =
             button [ class "ui button aligned left disabled" ] [ text "Back" ]
 
 
-viewFolderList : Time.Posix -> Id Folder -> FileSystem -> Html Msg
-viewFolderList time folderId fs =
+viewFolderList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> Html Msg
+viewFolderList here time folderId fs =
     let
         childrenFolders =
             FileSystem.foldersInFolder folderId fs
 
         taskLabels =
-            Statistics.labelTasks time (FileSystem.allTasks fs)
+            Statistics.labelTasks here time (FileSystem.allTasks fs)
 
         labeledFolders =
             List.map (\folder -> ( folder, Statistics.folderLabelWithId taskLabels (Folder.id folder) fs )) childrenFolders
@@ -1104,14 +1162,14 @@ viewFolderList time folderId fs =
     viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
 
 
-viewTaskList : Time.Posix -> Id Folder -> FileSystem -> Html Msg
-viewTaskList time folderId fs =
+viewTaskList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> Html Msg
+viewTaskList here time folderId fs =
     let
         childrenTasks =
             FileSystem.tasksInFolder folderId fs
 
         taskLabels =
-            Statistics.labelTasks time (FileSystem.allTasks fs)
+            Statistics.labelTasks here time (FileSystem.allTasks fs)
 
         labeledTasks =
             List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) childrenTasks
@@ -1142,6 +1200,9 @@ labelToColor label =
             "green"
 
         Statistics.DoLater ->
+            "blue"
+
+        Statistics.Done ->
             "black"
 
 

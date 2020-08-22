@@ -9,12 +9,22 @@ module May.SyncList exposing
     , empty
     , encode
     , needsSync
+    , syncListMutation
     )
 
 {-| The SyncList keeps track of all the changes that have been made that have
 not yet been sent to the server.
 -}
 
+import Api.Enum.PatchCommandType
+import Api.InputObject
+import Api.Mutation as Mutation
+import Api.Object
+import Api.Object.PatchNodeResponse
+import CustomScalarCodecs
+import Graphql.Operation as Graphql
+import Graphql.OptionalArgument as Graphql
+import Graphql.SelectionSet as Graphql
 import Json.Decode as D
 import Json.Encode as E
 import May.Folder as Folder exposing (Folder)
@@ -70,6 +80,19 @@ encodeSyncAction action =
             E.object [ ( "action", E.string "delete" ), ( "id", encodeSyncNodeId nodeId ) ]
 
 
+catJusts : List (Maybe a) -> List a
+catJusts lst =
+    case lst of
+        [] ->
+            []
+
+        (Just a) :: xs ->
+            a :: catJusts xs
+
+        Nothing :: xs ->
+            catJusts xs
+
+
 encodeSyncUpdateNode : SyncUpdateNode -> E.Value
 encodeSyncUpdateNode updateNode =
     case updateNode of
@@ -90,13 +113,14 @@ encodeSyncUpdateNode updateNode =
                     , ( "duration", E.float (Task.duration task) )
                     , ( "pid", Id.encode pid )
                     ]
-            in
-            case Task.due task of
-                Just dueDate ->
-                    E.object (( "due", E.int (Time.posixToMillis dueDate) ) :: fields)
 
-                Nothing ->
-                    E.object fields
+                optionals =
+                    catJusts
+                        [ Maybe.map (\d -> ( "due", E.int (Time.posixToMillis d) )) (Task.due task)
+                        , Maybe.map (\d -> ( "doneOn", E.int (Time.posixToMillis d) )) (Task.doneOn task)
+                        ]
+            in
+            E.object (optionals ++ fields)
 
 
 encodeSyncNodeId : SyncNodeId -> E.Value
@@ -152,3 +176,41 @@ addNode update list =
 deleteNode : SyncNodeId -> SyncList -> SyncList
 deleteNode id sl =
     SyncDelete id :: filterOutId id sl
+
+
+syncListMutation : SyncList -> Graphql.SelectionSet Bool Graphql.RootMutation
+syncListMutation list =
+    Mutation.patchNodes { args = List.map mapPatchCommand list } responseSelectionSet
+
+
+responseSelectionSet : Graphql.SelectionSet Bool Api.Object.PatchNodeResponse
+responseSelectionSet =
+    Api.Object.PatchNodeResponse.ok
+
+
+mapPatchCommand : SyncAction -> Api.InputObject.PatchCommand
+mapPatchCommand action =
+    case action of
+        SyncUpdate update ->
+            Api.InputObject.buildPatchCommand { type_ = Api.Enum.PatchCommandType.Update }
+                (\x ->
+                    case update of
+                        SyncUpdateFolder parent folder ->
+                            { x | folder = Graphql.Present <| Api.InputObject.buildPatchFolder { parent = Id.magic parent, name = Folder.name folder, id = Id.magic <| Folder.id folder } }
+
+                        SyncUpdateTask parent task ->
+                            { x | task = Graphql.Present <| Api.InputObject.buildPatchTask { parent = Id.magic <| parent, name = Task.name task, id = Id.magic <| Task.id task, duration = Task.duration task } (\op -> { due = Maybe.withDefault op.due (Maybe.map Graphql.Present <| Task.due task), doneOn = Maybe.withDefault op.doneOn (Maybe.map Graphql.Present <| Task.doneOn task) }) }
+                )
+
+        SyncDelete id ->
+            Api.InputObject.buildPatchCommand { type_ = Api.Enum.PatchCommandType.Delete } (\x -> { x | id = Graphql.Present <| syncFolderIdToGraphqlId id })
+
+
+syncFolderIdToGraphqlId : SyncNodeId -> CustomScalarCodecs.Id
+syncFolderIdToGraphqlId id =
+    case id of
+        SyncFolderId folderid ->
+            Id.magic folderid
+
+        SyncTaskId taskid ->
+            Id.magic taskid

@@ -12,8 +12,13 @@ type alias Id =
     Api.Scalar.Id
 
 
-codecs : Api.Scalar.Codecs Id
+type alias PosixTime =
+    Api.Scalar.PosixTime
+
+
+codecs : Api.Scalar.Codecs Id PosixTime
 codecs =
     Api.Scalar.defineCodecs
         { codecId = defaultCodecs.codecId
+        , codecPosixTime = defaultCodecs.codecPosixTime
         }

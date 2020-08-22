@@ -26,6 +26,7 @@ module May.FileSystem exposing
     , taskParent
     , tasksInFolder
     , updateFS
+    , updateSelectionSet
     )
 
 {-| This module uses a graph to represent all the types of relationships
@@ -35,6 +36,15 @@ It also handles the updating of the file system from the backend.
 
 -}
 
+import Api.Object
+import Api.Object.Folder
+import Api.Object.Me
+import Api.Object.Task
+import Api.Query
+import Api.Union
+import Api.Union.Node
+import Graphql.Operation as Graphql
+import Graphql.SelectionSet as Graphql
 import Json.Decode as D
 import Json.Encode as E
 import May.Folder as Folder exposing (Folder)
@@ -324,6 +334,19 @@ encode (FileSystem fs) =
         ]
 
 
+catJusts : List (Maybe a) -> List a
+catJusts lst =
+    case lst of
+        [] ->
+            []
+
+        (Just a) :: xs ->
+            a :: catJusts xs
+
+        Nothing :: xs ->
+            catJusts xs
+
+
 encodeTaskNode : TaskInfo -> E.Value
 encodeTaskNode info =
     let
@@ -333,13 +356,14 @@ encodeTaskNode info =
             , ( "id", Id.encode (Task.id info.task) )
             , ( "pid", Id.encode info.parent )
             ]
-    in
-    case Task.due info.task of
-        Just dueDate ->
-            E.object (( "due", E.int (Time.posixToMillis dueDate) ) :: fields)
 
-        Nothing ->
-            E.object fields
+        optionals =
+            catJusts
+                [ Maybe.map (\d -> ( "due", E.int (Time.posixToMillis d) )) (Task.due info.task)
+                , Maybe.map (\d -> ( "doneOn", E.int (Time.posixToMillis d) )) (Task.doneOn info.task)
+                ]
+    in
+    E.object (optionals ++ fields)
 
 
 encodeFolderNode : FolderInfo -> E.Value
@@ -539,6 +563,47 @@ type FSUpdate
 fsUpdateDecoder : D.Decoder FSUpdate
 fsUpdateDecoder =
     D.map FSUpdate (D.list nodeDecoder)
+
+
+updateSelectionSet : Graphql.SelectionSet FSUpdate Graphql.RootQuery
+updateSelectionSet =
+    Graphql.map FSUpdate (Api.Query.me (Api.Object.Me.nodes nodeSelectionSet))
+
+
+nodeSelectionSet : Graphql.SelectionSet Node Api.Union.Node
+nodeSelectionSet =
+    Api.Union.Node.fragments
+        { onFolder = Graphql.map FolderNode folderSelectionSet
+        , onTask = Graphql.map TaskNode taskSelectionSet
+        }
+
+
+folderSelectionSet : Graphql.SelectionSet FolderInfo Api.Object.Folder
+folderSelectionSet =
+    Graphql.map3 (\fid name parent -> { parent = Id.magic parent, folder = Folder.new (Id.magic fid) name })
+        Api.Object.Folder.id
+        Api.Object.Folder.name
+        Api.Object.Folder.parent
+
+
+taskSelectionSet : Graphql.SelectionSet TaskInfo Api.Object.Task
+taskSelectionSet =
+    Graphql.map6
+        (\tid name parent due duration doneOn ->
+            { parent = Id.magic parent
+            , task =
+                Task.new (Id.magic tid) name
+                    |> Task.setDue due
+                    |> Task.setDuration duration
+                    |> Task.setDoneOn doneOn
+            }
+        )
+        Api.Object.Task.id
+        Api.Object.Task.name
+        Api.Object.Task.parent
+        Api.Object.Task.due
+        Api.Object.Task.duration
+        Api.Object.Task.doneOn
 
 
 nodeDecoder : D.Decoder Node

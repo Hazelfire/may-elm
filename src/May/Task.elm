@@ -1,6 +1,7 @@
 module May.Task exposing
     ( Task
     , decode
+    , doneOn
     , due
     , duration
     , encode
@@ -8,6 +9,7 @@ module May.Task exposing
     , name
     , new
     , rename
+    , setDoneOn
     , setDue
     , setDuration
     )
@@ -26,9 +28,8 @@ type alias TaskInternals =
     { id : Id Task
     , name : String
     , duration : Float
-    , dependencies : List (Id Task)
     , due : Maybe Time.Posix
-    , labels : List String
+    , doneOn : Maybe Time.Posix
     }
 
 
@@ -43,9 +44,8 @@ new taskId newName =
         { id = taskId
         , name = newName
         , duration = 0.0
-        , labels = []
-        , dependencies = []
         , due = Nothing
+        , doneOn = Nothing
         }
 
 
@@ -74,9 +74,32 @@ due (Task task) =
     task.due
 
 
+doneOn : Task -> Maybe Time.Posix
+doneOn (Task task) =
+    task.doneOn
+
+
 setDue : Maybe Time.Posix -> Task -> Task
 setDue newDue (Task task) =
     Task <| { task | due = newDue }
+
+
+setDoneOn : Maybe Time.Posix -> Task -> Task
+setDoneOn newDoneOn (Task task) =
+    Task <| { task | doneOn = newDoneOn }
+
+
+catJusts : List (Maybe a) -> List a
+catJusts lst =
+    case lst of
+        [] ->
+            []
+
+        (Just a) :: xs ->
+            a :: catJusts xs
+
+        Nothing :: xs ->
+            catJusts xs
 
 
 encode : Task -> E.Value
@@ -87,22 +110,22 @@ encode task =
             , ( "duration", E.float (duration task) )
             , ( "id", Id.encode (id task) )
             ]
-    in
-    case due task of
-        Just dueDate ->
-            E.object (( "due", E.int (Time.posixToMillis dueDate) ) :: fields)
 
-        Nothing ->
-            E.object fields
+        optionals =
+            catJusts
+                [ Maybe.map (\d -> ( "due", E.int (Time.posixToMillis d) )) (due task)
+                , Maybe.map (\d -> ( "doneOn", E.int (Time.posixToMillis d) )) (doneOn task)
+                ]
+    in
+    E.object (optionals ++ fields)
 
 
 decode : D.Decoder Task
 decode =
     D.map Task <|
-        D.map6 TaskInternals
+        D.map5 TaskInternals
             (D.field "id" Id.decode)
             (D.field "name" D.string)
             (D.field "duration" D.float)
-            (D.succeed [])
             (D.maybe (D.field "due" (D.map Time.millisToPosix D.int)))
-            (D.succeed [])
+            (D.maybe (D.field "doneOn" (D.map Time.millisToPosix D.int)))

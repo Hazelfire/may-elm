@@ -4,7 +4,135 @@
 
 module Api.InputObject exposing (..)
 
+import Api.Enum.PatchCommandType
+import Api.Interface
+import Api.Object
+import Api.Scalar
+import Api.Union
+import CustomScalarCodecs
+import Graphql.Internal.Builder.Argument as Argument exposing (Argument)
+import Graphql.Internal.Builder.Object as Object
+import Graphql.Internal.Encode as Encode exposing (Value)
+import Graphql.OptionalArgument exposing (OptionalArgument(..))
+import Graphql.SelectionSet exposing (SelectionSet)
+import Json.Decode as Decode
 
-placeholder : String
-placeholder =
-    ""
+
+buildPatchCommand :
+    PatchCommandRequiredFields
+    -> (PatchCommandOptionalFields -> PatchCommandOptionalFields)
+    -> PatchCommand
+buildPatchCommand required fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { id = Absent, folder = Absent, task = Absent }
+    in
+    { type_ = required.type_, id = optionals.id, folder = optionals.folder, task = optionals.task }
+
+
+type alias PatchCommandRequiredFields =
+    { type_ : Api.Enum.PatchCommandType.PatchCommandType }
+
+
+type alias PatchCommandOptionalFields =
+    { id : OptionalArgument CustomScalarCodecs.Id
+    , folder : OptionalArgument PatchFolder
+    , task : OptionalArgument PatchTask
+    }
+
+
+{-| Type for the PatchCommand input object.
+-}
+type alias PatchCommand =
+    { type_ : Api.Enum.PatchCommandType.PatchCommandType
+    , id : OptionalArgument CustomScalarCodecs.Id
+    , folder : OptionalArgument PatchFolder
+    , task : OptionalArgument PatchTask
+    }
+
+
+{-| Encode a PatchCommand into a value that can be used as an argument.
+-}
+encodePatchCommand : PatchCommand -> Value
+encodePatchCommand input =
+    Encode.maybeObject
+        [ ( "type", Encode.enum Api.Enum.PatchCommandType.toString input.type_ |> Just ), ( "id", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecId) |> Encode.optional input.id ), ( "folder", encodePatchFolder |> Encode.optional input.folder ), ( "task", encodePatchTask |> Encode.optional input.task ) ]
+
+
+buildPatchFolder :
+    PatchFolderRequiredFields
+    -> PatchFolder
+buildPatchFolder required =
+    { parent = required.parent, name = required.name, id = required.id }
+
+
+type alias PatchFolderRequiredFields =
+    { parent : CustomScalarCodecs.Id
+    , name : String
+    , id : CustomScalarCodecs.Id
+    }
+
+
+{-| Type for the PatchFolder input object.
+-}
+type alias PatchFolder =
+    { parent : CustomScalarCodecs.Id
+    , name : String
+    , id : CustomScalarCodecs.Id
+    }
+
+
+{-| Encode a PatchFolder into a value that can be used as an argument.
+-}
+encodePatchFolder : PatchFolder -> Value
+encodePatchFolder input =
+    Encode.maybeObject
+        [ ( "parent", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecId) input.parent |> Just ), ( "name", Encode.string input.name |> Just ), ( "id", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecId) input.id |> Just ) ]
+
+
+buildPatchTask :
+    PatchTaskRequiredFields
+    -> (PatchTaskOptionalFields -> PatchTaskOptionalFields)
+    -> PatchTask
+buildPatchTask required fillOptionals =
+    let
+        optionals =
+            fillOptionals
+                { due = Absent, doneOn = Absent }
+    in
+    { parent = required.parent, name = required.name, id = required.id, duration = required.duration, due = optionals.due, doneOn = optionals.doneOn }
+
+
+type alias PatchTaskRequiredFields =
+    { parent : CustomScalarCodecs.Id
+    , name : String
+    , id : CustomScalarCodecs.Id
+    , duration : Float
+    }
+
+
+type alias PatchTaskOptionalFields =
+    { due : OptionalArgument CustomScalarCodecs.PosixTime
+    , doneOn : OptionalArgument CustomScalarCodecs.PosixTime
+    }
+
+
+{-| Type for the PatchTask input object.
+-}
+type alias PatchTask =
+    { parent : CustomScalarCodecs.Id
+    , name : String
+    , id : CustomScalarCodecs.Id
+    , duration : Float
+    , due : OptionalArgument CustomScalarCodecs.PosixTime
+    , doneOn : OptionalArgument CustomScalarCodecs.PosixTime
+    }
+
+
+{-| Encode a PatchTask into a value that can be used as an argument.
+-}
+encodePatchTask : PatchTask -> Value
+encodePatchTask input =
+    Encode.maybeObject
+        [ ( "parent", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecId) input.parent |> Just ), ( "name", Encode.string input.name |> Just ), ( "id", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecId) input.id |> Just ), ( "duration", Encode.float input.duration |> Just ), ( "due", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecPosixTime) |> Encode.optional input.due ), ( "doneOn", (CustomScalarCodecs.codecs |> Api.Scalar.unwrapEncoder .codecPosixTime) |> Encode.optional input.doneOn ) ]

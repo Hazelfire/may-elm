@@ -8,8 +8,8 @@ import Api.InputObject
 import Api.Interface
 import Api.Object
 import Api.Scalar
-import Api.ScalarCodecs
 import Api.Union
+import CustomScalarCodecs
 import Graphql.Internal.Builder.Argument as Argument exposing (Argument)
 import Graphql.Internal.Builder.Object as Object
 import Graphql.Internal.Encode as Encode exposing (Value)
@@ -19,14 +19,14 @@ import Graphql.SelectionSet exposing (SelectionSet)
 import Json.Decode as Decode
 
 
-id : SelectionSet Api.ScalarCodecs.Id Api.Object.Folder
+id : SelectionSet CustomScalarCodecs.Id Api.Object.Folder
 id =
-    Object.selectionForField "ScalarCodecs.Id" "id" [] (Api.ScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
+    Object.selectionForField "CustomScalarCodecs.Id" "id" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
-pid : SelectionSet Api.ScalarCodecs.Id Api.Object.Folder
-pid =
-    Object.selectionForField "ScalarCodecs.Id" "pid" [] (Api.ScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
+parent : SelectionSet CustomScalarCodecs.Id Api.Object.Folder
+parent =
+    Object.selectionForField "CustomScalarCodecs.Id" "parent" [] (CustomScalarCodecs.codecs |> Api.Scalar.unwrapCodecs |> .codecId |> .decoder)
 
 
 name : SelectionSet String Api.Object.Folder

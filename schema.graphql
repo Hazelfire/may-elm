@@ -1,16 +1,18 @@
 union Node = Task | Folder
 
+scalar PosixTime 
 type Task {
   id : ID!
   name : String!
-  due : Int
-  pid : ID!
-  duration : Int!
+  due : PosixTime
+  parent : ID!
+  duration : Float!
+  doneOn : PosixTime
 }
 
 type Folder {
   id : ID!
-  pid : ID!
+  parent : ID!
   name : String!
 }
 
@@ -20,4 +22,39 @@ type Me {
 
 type Query {
   me : Me!
+}
+
+enum PatchCommandType {
+  DELETE
+  UPDATE
+}
+
+type Mutation {
+ patchNodes (args: [PatchCommand!]!) : PatchNodeResponse!
+}
+
+input PatchCommand {
+  type : PatchCommandType!
+  id : ID
+  folder : PatchFolder
+  task : PatchTask
+}
+
+input PatchTask {
+  parent : ID!
+  name : String!
+  id : ID!
+  duration : Float!
+  due : PosixTime
+  doneOn : PosixTime
+}
+
+input PatchFolder {
+  parent : ID!
+  name : String!
+  id : ID!
+}
+
+type PatchNodeResponse {
+  ok : Boolean!
 }

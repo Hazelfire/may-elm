@@ -1,5 +1,8 @@
-module May.Id exposing (Id, decode, encode, generate, rootId, testId)
+module May.Id exposing (Id, decode, encode, generate, magic, rootId, testId)
 
+import Api.Scalar
+import Api.ScalarCodecs
+import Graphql.SelectionSet as Graphql
 import Json.Decode as D
 import Json.Encode as E
 import Random
@@ -14,6 +17,13 @@ type Id a
 generateId : Random.Generator String
 generateId =
     Random.map String.fromList (Random.list 100 (Random.map Char.fromCode (Random.int 0 127)))
+
+
+{-| I am only using this coz code gen. Please don't use it often
+-}
+magic : Id a -> Id b
+magic (Id a) =
+    Id a
 
 
 generate : Random.Generator (Id a)

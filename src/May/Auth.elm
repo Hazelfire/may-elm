@@ -13,12 +13,14 @@ module May.Auth exposing
     , refreshTokens
     , stateAuthTokens
     , tokensDecoder
+    , withGqlAuthHeader
     )
 
 {-| Authentication module, handles authenticating and getting tokens and such
 things
 -}
 
+import Graphql.Http
 import Http
 import Json.Decode as D
 import Json.Encode as E
@@ -152,6 +154,11 @@ encodeTokens (AuthTokens tokens) =
 authHeader : AuthTokens -> Http.Header
 authHeader (AuthTokens authTokens) =
     Http.header "Authorization" authTokens.accessToken
+
+
+withGqlAuthHeader : AuthTokens -> Graphql.Http.Request a -> Graphql.Http.Request a
+withGqlAuthHeader (AuthTokens { accessToken }) =
+    Graphql.Http.withHeader "Authorization" accessToken
 
 
 type alias AuthTokensResponse =
