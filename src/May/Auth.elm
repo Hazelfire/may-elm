@@ -20,11 +20,16 @@ module May.Auth exposing
 things
 -}
 
+import Api.Mutation
+import Api.Object.OkResult
 import Graphql.Http
+import Graphql.Operation as Graphql
+import Graphql.SelectionSet as Graphql
 import Http
 import Json.Decode as D
 import Json.Encode as E
 import Jwt
+import May.Urls as Urls
 import Task exposing (Task)
 import Time
 
@@ -34,8 +39,11 @@ type AuthState
     | Authenticating
     | AuthFailed
     | Authenticated AuthTokens
+    | CheckingSubscription AuthTokens
+    | CheckingSubscriptionFailed AuthTokens
     | SubscriptionNeeded AuthTokens
-    | SubscriptionRequested
+    | SubscriptionRequested AuthTokens
+    | SubscriptionRequestFailed AuthTokens
     | DeletingUser AuthTokens
     | DeleteUserFailed AuthTokens
 
@@ -55,8 +63,26 @@ stateAuthTokens state =
         DeleteUserFailed x ->
             Just x
 
-        _ ->
+        CheckingSubscription x ->
+            Just x
+
+        CheckingSubscriptionFailed x ->
+            Just x
+
+        AuthFailed ->
             Nothing
+
+        Unauthenticated ->
+            Nothing
+
+        Authenticating ->
+            Nothing
+
+        SubscriptionRequested x ->
+            Just x
+
+        SubscriptionRequestFailed x ->
+            Just x
 
 
 authStateToString : AuthState -> String
@@ -77,7 +103,7 @@ authStateToString state =
         SubscriptionNeeded _ ->
             "Get a Subscription"
 
-        SubscriptionRequested ->
+        SubscriptionRequested _ ->
             "Forwarding you to payment"
 
         DeletingUser _ ->
@@ -85,6 +111,15 @@ authStateToString state =
 
         DeleteUserFailed _ ->
             "Deleting User failed"
+
+        CheckingSubscription _ ->
+            "Checking for a subscription"
+
+        CheckingSubscriptionFailed _ ->
+            "Failed to check for subscription"
+
+        SubscriptionRequestFailed _ ->
+            "Failed subscription request"
 
 
 type AuthTokens
@@ -124,9 +159,21 @@ type alias AccessToken =
 
 decodeAccessToken : D.Decoder AccessToken
 decodeAccessToken =
-    D.map2 AccessToken
-        (D.field "cognito:groups" (D.list D.string))
-        (D.field "sub" D.string)
+    D.maybe (D.field "cognito:groups" (D.list D.string))
+        |> D.andThen
+            (\groupsM ->
+                let
+                    groups =
+                        case groupsM of
+                            Just g ->
+                                g
+
+                            Nothing ->
+                                []
+                in
+                D.map (AccessToken groups)
+                    (D.field "sub" D.string)
+            )
 
 
 tokensDecoder : D.Decoder AuthTokens
@@ -248,7 +295,7 @@ exchangeAuthCodeBody code =
 
 authBase : String
 authBase =
-    "https://auth.may.hazelfire.net"
+    Urls.authBase
 
 
 clientId : String
@@ -314,17 +361,17 @@ authTokenNeedsRefresh now (AuthTokens tokens) =
     Time.posixToMillis tokens.expiresAt - Time.posixToMillis now < 5 * 1000 * 60
 
 
-deleteUser : (Result Http.Error () -> a) -> AuthTokens -> Cmd a
+deleteUser : (Result (Graphql.Http.Error Bool) Bool -> a) -> AuthTokens -> Cmd a
 deleteUser message tokens =
-    Http.request
-        { url = "https://api.may.hazelfire.net/me"
-        , method = "DELETE"
-        , body = Http.emptyBody
-        , headers = [ authHeader tokens ]
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectWhatever message
-        }
+    deleteUserSelectionSet
+        |> Graphql.Http.mutationRequest (Urls.backendBase ++ "/")
+        |> withGqlAuthHeader tokens
+        |> Graphql.Http.send message
+
+
+deleteUserSelectionSet : Graphql.SelectionSet Bool Graphql.RootMutation
+deleteUserSelectionSet =
+    Api.Mutation.deleteUser Api.Object.OkResult.ok
 
 
 email : AuthTokens -> String

@@ -24,3 +24,8 @@ nodes :
     -> SelectionSet (List decodesTo) Api.Object.Me
 nodes object_ =
     Object.selectionForCompositeField "nodes" [] object_ (identity >> Decode.list)
+
+
+subscription : SelectionSet Bool Api.Object.Me
+subscription =
+    Object.selectionForField "Bool" "subscription" [] Decode.bool

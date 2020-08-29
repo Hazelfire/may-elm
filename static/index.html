@@ -27,6 +27,7 @@
 <body>
 <div id="elmroot"></div>
   <script>
+const mockStripe = false;
 const params = new URLSearchParams(window.location.search)
 if(params.has('code')){
   // We just came back from an authentication, I'll include the code within
@@ -64,24 +65,30 @@ else {
   });
 
   app.ports.openStripe.subscribe(function(sessionId) {
-    var stripe = Stripe('pk_test_218Wbt0Tcdvhoy44q2rBg3bw');
-    stripe.redirectToCheckout({
-      // Make the id field from the Checkout Session creation API response
-      // available to this file, so you can provide it as argument here
-      // instead of the {{CHECKOUT_SESSION_ID}} placeholder.
-      sessionId
-    }).then(function (result) {
-      console.log(result);
-      // If `redirectToCheckout` fails due to a browser or network
-      // error, display the localized error message to your customer
-      // using `result.error.message`.
-    });
+    if(mockStripe){
+      window.location.replace("http://localhost:3000/stripe")
+    }
+    else {
+      var stripe = Stripe('pk_live_p7RnEFmP2sWP65uUYysqOomz');
+      stripe.redirectToCheckout({
+        // Make the id field from the Checkout Session creation API response
+        // available to this file, so you can provide it as argument here
+        // instead of the {{CHECKOUT_SESSION_ID}} placeholder.
+        sessionId
+      }).then(function (result) {
+        console.log(result);
+        // If `redirectToCheckout` fails due to a browser or network
+        // error, display the localized error message to your customer
+        // using `result.error.message`.
+      });
+    } 
   });
   app.ports.setFocus.subscribe(function(id) {
     window.requestAnimationFrame(() => {
       let element = document.getElementById(id)
       if(element){
         element.focus();
+        element.select();
       }
     });
   });

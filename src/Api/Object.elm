@@ -13,8 +13,8 @@ type Me
     = Me
 
 
-type PatchNodeResponse
-    = PatchNodeResponse
+type OkResult
+    = OkResult
 
 
 type Task

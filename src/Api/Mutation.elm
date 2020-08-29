@@ -25,7 +25,19 @@ type alias PatchNodesRequiredArguments =
 
 patchNodes :
     PatchNodesRequiredArguments
-    -> SelectionSet decodesTo Api.Object.PatchNodeResponse
+    -> SelectionSet decodesTo Api.Object.OkResult
     -> SelectionSet decodesTo RootMutation
 patchNodes requiredArgs object_ =
     Object.selectionForCompositeField "patchNodes" [ Argument.required "args" requiredArgs.args (Api.InputObject.encodePatchCommand |> Encode.list) ] object_ identity
+
+
+deleteUser :
+    SelectionSet decodesTo Api.Object.OkResult
+    -> SelectionSet decodesTo RootMutation
+deleteUser object_ =
+    Object.selectionForCompositeField "deleteUser" [] object_ identity
+
+
+requestSubscriptionSession : SelectionSet String RootMutation
+requestSubscriptionSession =
+    Object.selectionForField "String" "requestSubscriptionSession" [] Decode.string

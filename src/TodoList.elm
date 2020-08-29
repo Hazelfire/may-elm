@@ -14,13 +14,18 @@ port module TodoList exposing
 {-| Main module. Contains main method for the application
 -}
 
+import Api.Mutation
+import Api.Object.Me
+import Api.Query
+import Axis
 import Browser
 import Date
 import Graphql.Http
-import Html exposing (Attribute, Html, a, button, div, h3, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, href, id, type_, value)
+import Graphql.Operation as Graphql
+import Graphql.SelectionSet as Graphql
+import Html exposing (Attribute, Html, a, button, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
-import Http
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
@@ -31,9 +36,17 @@ import May.Id as Id exposing (Id)
 import May.Statistics as Statistics
 import May.SyncList as SyncList exposing (SyncList)
 import May.Task as Task exposing (Task)
+import May.Urls as Urls
 import Random
+import Scale
 import Task
 import Time
+import TypedSvg as Svg
+import TypedSvg.Attributes as Svg
+import TypedSvg.Attributes.InPx as SvgPx
+import TypedSvg.Core as Svg
+import TypedSvg.Events as Svg
+import TypedSvg.Types as Svg
 
 
 type alias Model =
@@ -51,6 +64,8 @@ type Notice
     = NoNotice
     | AskForSubscription
     | AskConfirmDeleteAccount
+    | AskForLogin
+    | ShowHelp
 
 
 type SyncStatus
@@ -70,6 +85,7 @@ type ViewId
 type ViewType
     = ViewTypeFolder FolderView
     | ViewTypeTask TaskView
+    | ViewTypeStatistics
 
 
 type alias TaskView =
@@ -110,9 +126,10 @@ newTaskView id =
 type Msg
     = CreateFolder (Id Folder)
     | GotAuthResponse (Result String Auth.AuthTokens)
-    | GotSubscriptionSessionId (Result Http.Error String)
+    | GotSubscriptionSessionId (Result (Graphql.Http.Error String) String)
     | GotNodes (Result (Graphql.Http.Error FileSystem.FSUpdate) FileSystem.FSUpdate)
     | GotUpdateSuccess (Result (Graphql.Http.Error Bool) Bool)
+    | GotSubscriptionCheck (Result (Graphql.Http.Error Bool) Bool)
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
@@ -139,10 +156,14 @@ type Msg
     | CloseConfirmDeleteTask
     | DeleteTask (Id Task)
     | Logout
+    | LogInConfirm
     | ConfirmDeleteAccount
-    | CancelConfirmDeleteAccount
+    | ClearNotices
     | DeleteAccount
-    | GotDeleteAccount (Result Http.Error ())
+    | GotDeleteAccount (Result (Graphql.Http.Error Bool) Bool)
+    | CancelAskForLogin
+    | ShowHelpNotice
+    | ViewUrgency
     | NoOp
 
 
@@ -213,7 +234,7 @@ init flagsValue =
                         ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
 
                     else
-                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch requiredActions )
+                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
 
                 _ ->
                     ( initModel, Cmd.batch requiredActions )
@@ -335,11 +356,16 @@ update message model =
         SetTaskDue tid due ->
             saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
 
+        SetTaskDueNow tid ->
+            case ( model.currentTime, model.currentZone ) of
+                ( Just now, Just here ) ->
+                    saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue (Just (addWeek here now)))) model
+
+                _ ->
+                    pure model
+
         SetTaskDoneOn tid doneOn ->
             saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDoneOn doneOn)) model
-
-        SetTaskDueNow tid ->
-            ( model, Time.now |> Task.perform (addWeek >> Just >> SetTaskDue tid) )
 
         ConfirmDeleteTask ->
             pure <| mapViewing (mapTaskView (mapTaskEditing (always ConfirmingDeleteTask))) model
@@ -411,7 +437,30 @@ update message model =
             ( model, openStripe sessionId )
 
         GotSubscriptionSessionId (Err _) ->
-            pure <| { model | authState = Auth.AuthFailed }
+            case Auth.stateAuthTokens model.authState of
+                Just tokens ->
+                    pure <| { model | authState = Auth.SubscriptionRequestFailed tokens }
+
+                Nothing ->
+                    pure model
+
+        GotSubscriptionCheck (Err _) ->
+            withTokens model <|
+                \tokens ->
+                    pure { model | authState = Auth.CheckingSubscriptionFailed tokens }
+
+        GotSubscriptionCheck (Ok True) ->
+            case Auth.stateAuthTokens model.authState of
+                Just tokens ->
+                    ( { model | authState = Auth.Authenticated tokens, syncStatus = Retreiving, notice = NoNotice }, requestNodes tokens )
+
+                Nothing ->
+                    pure model
+
+        GotSubscriptionCheck (Ok False) ->
+            withTokens model <|
+                \tokens ->
+                    pure <| { model | authState = Auth.SubscriptionNeeded tokens }
 
         GotNodes (Ok fsUpdate) ->
             case Auth.stateAuthTokens model.authState of
@@ -462,7 +511,7 @@ update message model =
         ConfirmDeleteAccount ->
             pure <| { model | notice = AskConfirmDeleteAccount }
 
-        CancelConfirmDeleteAccount ->
+        ClearNotices ->
             pure <| { model | notice = NoNotice }
 
         DeleteAccount ->
@@ -490,19 +539,46 @@ update message model =
                     , notice = NoNotice
                 }
 
+        LogInConfirm ->
+            pure <| { model | notice = AskForLogin }
+
+        CancelAskForLogin ->
+            pure <| { model | notice = NoNotice }
+
+        ShowHelpNotice ->
+            pure <| { model | notice = ShowHelp }
+
+        ViewUrgency ->
+            case model.viewing of
+                ViewTypeStatistics ->
+                    pure <| { model | viewing = newFolderView (FileSystem.getRootId model.fs) }
+
+                _ ->
+                    pure <| { model | viewing = ViewTypeStatistics }
+
         NoOp ->
             pure model
 
 
 backendBase : String
 backendBase =
-    "https://api.may.hazelfire.net"
+    Urls.backendBase
+
+
+withTokens : Model -> (Auth.AuthTokens -> ( Model, Cmd msg )) -> ( Model, Cmd msg )
+withTokens model callback =
+    case Auth.stateAuthTokens model.authState of
+        Just tokens ->
+            callback tokens
+
+        Nothing ->
+            pure model
 
 
 sendSyncList : Auth.AuthTokens -> SyncList -> Cmd Msg
 sendSyncList tokens synclist =
     SyncList.syncListMutation synclist
-        |> Graphql.Http.mutationRequest "http://localhost:3000/"
+        |> Graphql.Http.mutationRequest (backendBase ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotUpdateSuccess
 
@@ -510,22 +586,35 @@ sendSyncList tokens synclist =
 requestNodes : Auth.AuthTokens -> Cmd Msg
 requestNodes tokens =
     FileSystem.updateSelectionSet
-        |> Graphql.Http.queryRequest "http://localhost:3000/"
+        |> Graphql.Http.queryRequest (backendBase ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotNodes
 
 
+checkSubscription : Auth.AuthTokens -> Cmd Msg
+checkSubscription tokens =
+    checkSubscriptionSelectionSet
+        |> Graphql.Http.queryRequest (backendBase ++ "/")
+        |> Auth.withGqlAuthHeader tokens
+        |> Graphql.Http.send GotSubscriptionCheck
+
+
+checkSubscriptionSelectionSet : Graphql.SelectionSet Bool Graphql.RootQuery
+checkSubscriptionSelectionSet =
+    Api.Query.me Api.Object.Me.subscription
+
+
 requestSubscription : Auth.AuthTokens -> Cmd Msg
 requestSubscription tokens =
-    Http.request
-        { url = backendBase ++ "/subscription_session"
-        , method = "GET"
-        , body = Http.emptyBody
-        , headers = [ Auth.authHeader tokens ]
-        , timeout = Nothing
-        , tracker = Nothing
-        , expect = Http.expectJson GotSubscriptionSessionId D.string
-        }
+    requestSubscriptionSelectionSet
+        |> Graphql.Http.mutationRequest (backendBase ++ "/")
+        |> Auth.withGqlAuthHeader tokens
+        |> Graphql.Http.send GotSubscriptionSessionId
+
+
+requestSubscriptionSelectionSet : Graphql.SelectionSet String Graphql.RootMutation
+requestSubscriptionSelectionSet =
+    Api.Mutation.requestSubscriptionSession
 
 
 saveToLocalStorage : Model -> ( Model, Cmd msg )
@@ -575,9 +664,9 @@ withCommand commandFunc model =
     ( model, commandFunc model )
 
 
-addWeek : Time.Posix -> Time.Posix
-addWeek time =
-    Time.millisToPosix <| Time.posixToMillis time + (1000 * 60 * 60 * 24 * 7)
+addWeek : Time.Zone -> Time.Posix -> Time.Posix
+addWeek _ time =
+    Time.millisToPosix <| Time.posixToMillis (Statistics.startOfDay Time.utc time) + (1000 * 60 * 60 * 24 * 7)
 
 
 mapViewing : (ViewType -> ViewType) -> Model -> Model
@@ -632,6 +721,9 @@ view model =
 
                         ViewTypeTask taskView ->
                             viewTaskDetails now taskView model.fs
+
+                        ViewTypeStatistics ->
+                            viewStatisticsDetails here now model
             in
             div []
                 [ viewHeader model
@@ -647,38 +739,206 @@ view model =
                             ]
 
                     _ ->
-                        viewNotice model.notice
+                        viewNotice model
                 ]
 
         _ ->
             div [] [ text "loading" ]
 
 
-viewNotice : Notice -> Html Msg
-viewNotice notice =
+viewNotice : Model -> Html Msg
+viewNotice model =
+    let
+        notice =
+            model.notice
+    in
     case notice of
         NoNotice ->
             div [] []
 
         AskConfirmDeleteAccount ->
-            div [ class "confirmdeleteaccount" ]
-                [ p [] [ text "Woah! Are you sure you want to delete your account?" ]
-                , p [] [ text "This will not delete any of your tasks that are on your devices. They will continue to work offline." ]
-                , p [] [ text "All records of you in all our online systems will be removed except for payment records. Your tasks and folders will not sync anymore." ]
-                , p [] [ text "Your current subscription with the service will be cancelled, and you will no longer get charged" ]
-                , p [] [ text "You will need to create a new account to get another subscription for this service" ]
-                , p [] [ text "Are you sure you want to delete your account?" ]
-                , button [ class "ui green button", onClick CancelConfirmDeleteAccount ] [ text "No, go back" ]
-                , button [ class "ui red button", onClick DeleteAccount ] [ text "Yes I'm sure. Delete my account" ]
+            div [ class "notice confirmdeleteaccount" ]
+                [ div
+                    [ class "noticecontent" ]
+                    [ h3 [] [ text "Woah! Are you sure you want to delete your account?" ]
+                    , p [] [ text "Deleting your account will stop your subscription. You will no longer be charged for this service. All records of you in all our online systems will be removed except for payment records. Your tasks and folders will not sync anymore." ]
+                    , p [] [ text "This will not delete any of your tasks or folders. The application will continue to work without an account." ]
+                    , p [] [ text "Are you sure you want to delete your account?" ]
+                    , button [ class "ui green button", onClick ClearNotices ] [ text "No, go back" ]
+                    , button [ class "ui red button", onClick DeleteAccount ] [ text "Yes I'm sure. Delete my account" ]
+                    ]
                 ]
 
         AskForSubscription ->
-            div [ class "askforsubscription" ]
-                [ p [] [ text "Welcome to the May!" ]
-                , button [ class "ui green button", onClick RequestSubscription ] [ text "Get Subscription" ]
-                , p [] [ text "If you don't want a subscription, you don't need an account. Everything will still work offline" ]
-                , button [ class "ui red button", onClick DeleteAccount ] [ text "Delete Account" ]
+            div [ class "notice askforsubscription" ]
+                [ div
+                    [ class "noticecontent" ]
+                    [ h3 [] [ text "Welcome to May!" ]
+                    , p [] [ text "A May account requires a subscription. The subscription costs $10 AUD a month and is charged through ", a [ href "https://stripe.com/" ] [ text "Stripe" ], text ". If you made a mistake and don't want a subscription, you can delete your account. All your tasks and folders will still be saved." ]
+                    , button [ class "ui green button", onClick RequestSubscription ] [ text "Get Subscription" ]
+                    , button [ class "ui red button", onClick DeleteAccount ] [ text "Remove Account" ]
+                    ]
                 ]
+
+        AskForLogin ->
+            div [ class "notice askforlogin" ]
+                [ div
+                    [ class "noticecontent" ]
+                    [ h3 [] [ text "Are you sure you want an account?" ]
+                    , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
+                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $10 (AUD) a month, for which I donate $5 to ", a [ href "https://effectivealtruism.org.au/", target "_blank" ] [ text "Effective Altruism Australia" ] ]
+                    , p [] [ text "If you want an account, go ahead and get one. Otherwise, you can go back to the free version." ]
+                    , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
+                    , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
+                    , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
+                    ]
+                ]
+
+        ShowHelp ->
+            div [ class "help notice" ]
+                [ div
+                    [ class "noticecontent" ]
+                    [ h3 [] [ text "May help" ]
+                    , p [] [ text "May is an application that can prioritise and give you insight into your tasks. It was built by Sam Nolan." ]
+                    , h5 [] [ text "Tasks and Folders" ]
+                    , p [] [ text "May has tasks and folders. Folders are simply meant for you to organise where your tasks go. No calculations are done on the folders." ]
+                    , p [] [ text "Tasks are things that need to get done. Tasks have a duration and a due date. If you want the full capability of May, your tasks should have a duration larger than 0 and a due date." ]
+                    , h5 [] [ text "Statistics" ]
+                    , p [] [ text "Urgency represents the amount of work that is recommended that you do today to get all your tasks done by their due dates. If you work less than this amount, then you will need to work more later. If you work more than this amount, then you will need to work less later." ]
+                    , p [] [ text "Done today sums up the amount of work that you have completed today, so that you can track your progress towards your urgency. Tomorrow is what your urgency will be tomorrow." ]
+                    , h5 [] [ text "Todo list" ]
+                    , p [] [ text "All tasks that are in May that are not done are in the todo list. The todo list has different sections." ]
+                    , p [] [ text "Any tasks that are overdue go into an Overdue list." ]
+                    , p [] [ text "Any task that May recommends that you complete today go into the Do Today list. Each task will have a percentage representing the extent that it recommends you complete the task." ]
+                    , p [] [ text "A task that if you were to complete would reduce your urgency go in the Do Soon list. Next to the task will be a date that May recommends that you complete the task by." ]
+                    , p [] [ text "A task that if you were to complete makes you no less busy, and does not reduce your urgency go in the Do Later list. Due dates are also given for this list" ]
+                    , p [] [ text "Any task that May cannot do calculation for because they are missing information (duration and due date) go in the No Info list." ]
+                    , p [] [ text "Any task that you complete today goes in the Done Today list." ]
+                    , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
+                    , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
+                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, for which I donate $5 to Ethical Altruism Australia. There is no such thing as a free account on May." ]
+                    , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
+                    , h5 [] [ text "Privacy and Terms of Service" ]
+                    , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
+                    , h5 [] [ text "Contact" ]
+                    , p [] [ text "If you have any questions, feature requests or just want to say hi, you can contact Sam Nolan at ", a [ href "mailto:sam@hazelfire.net" ] [ text "sam@hazelfire.net" ] ]
+                    ]
+                ]
+
+
+viewStatisticsDetails : Time.Zone -> Time.Posix -> Model -> Html Msg
+viewStatisticsDetails here now model =
+    let
+        tasks =
+            Statistics.dueDateRecommendations here now (Statistics.doneTodayAndLater here now (FileSystem.allTasks model.fs))
+    in
+    div [ class "notice urgencynotice" ]
+        [ h3 [] [ text "Urgency" ]
+        , p [] [ text "Urgency represents the amount of hours per day you need to do to complete your tasks by their due dates" ]
+        , if List.length tasks > 0 then
+            div []
+                [ p [] [ text "The following visualises how your urgency is calcualted" ]
+                , p [] [ text "Each task is a box, the height of the chart represents your urgency and the right edge of each box represents the due date that we recommend you complete the task by. Grey boxes represent tasks you have completed and the other colours represent the labels you are familiar with." ]
+                , p [] [ text "This was the best way that we could organise your tasks making urgency as low as possible. Completing tasks in the first block consist will decrease your urgency, however, doing a task in any later block would not mean you have to do any less work today." ]
+                , viewGroups here now tasks
+                ]
+
+          else
+            p [] [ text "You have an urgency of 0 because you do not have any tasks with both a duration larger than 0 and a due date that isn't completed" ]
+        ]
+
+
+viewGroups : Time.Zone -> Time.Posix -> List Statistics.LabeledTask -> Html Msg
+viewGroups here now tasks =
+    let
+        firsttask =
+            List.head tasks
+
+        maxTime =
+            List.head (List.reverse tasks) |> Maybe.andThen (.task >> Task.due)
+    in
+    case ( firsttask, maxTime ) of
+        ( Just ft, Just max ) ->
+            -- This should always be
+            let
+                min =
+                    ft.start
+
+                width =
+                    1000
+
+                height =
+                    750
+
+                padding =
+                    30
+
+                xscale =
+                    Scale.time here ( 0, width - 2 * padding ) ( min, max )
+
+                yscale =
+                    Scale.linear ( height - 2 * padding, 0 ) ( 0, ft.urgency )
+
+                labelTask task =
+                    if Task.doneOn task.task /= Nothing then
+                        Statistics.Done
+
+                    else if Time.posixToMillis task.start < Time.posixToMillis (Statistics.endOfDay here now) then
+                        Statistics.DoToday
+
+                    else if task.urgency == ft.urgency then
+                        Statistics.DoSoon
+
+                    else
+                        Statistics.DoLater
+            in
+            Svg.svg [ Svg.viewBox 0 0 width height ]
+                [ Svg.g [ Svg.class [ "axis" ], Svg.transform [ Svg.Translate padding padding ] ]
+                    [ Axis.left [ Axis.tickCount 10 ] yscale
+                    ]
+                , Svg.g [ Svg.class [ "axis" ], Svg.transform [ Svg.Translate padding (height - padding) ] ]
+                    [ Axis.bottom [ Axis.tickCount 10 ] xscale
+                    ]
+                , Svg.g [ Svg.transform [ Svg.Translate padding padding ], Svg.class [ "urgencyboxes" ] ]
+                    (List.map (\x -> viewUrgencyTaskBar xscale yscale (labelTask x) x) tasks)
+                ]
+
+        _ ->
+            div [] []
+
+
+viewUrgencyTaskBar : Scale.ContinuousScale Time.Posix -> Scale.ContinuousScale Float -> Statistics.Label -> Statistics.LabeledTask -> Svg.Svg Msg
+viewUrgencyTaskBar xscale yscale label { urgency, start, task, end } =
+    let
+        ( max, _ ) =
+            Scale.range yscale
+    in
+    Svg.rect
+        [ SvgPx.x (Scale.convert xscale start)
+        , SvgPx.y (Scale.convert yscale urgency)
+        , SvgPx.width (Scale.convert xscale end - Scale.convert xscale start)
+        , SvgPx.height (max - Scale.convert yscale urgency)
+        , Svg.onClick (SetView (ViewIdTask (Task.id task)))
+        , Svg.class
+            [ case label of
+                Statistics.DoSoon ->
+                    "dosoonbox"
+
+                Statistics.DoLater ->
+                    "dolaterbox"
+
+                Statistics.DoToday ->
+                    "dotodaybox"
+
+                Statistics.Done ->
+                    "donebox"
+
+                _ ->
+                    ""
+            , "clickable"
+            ]
+        ]
+        []
 
 
 viewHeader : Model -> Html Msg
@@ -710,7 +970,28 @@ viewHeader model =
                     Auth.authStateToString model.authState
     in
     nav [ class "ui purple inverted menu top-menu" ]
-        [ a [ class "item" ] [ text "May" ]
+        [ a
+            [ class
+                (if model.notice /= ShowHelp then
+                    "active item"
+
+                 else
+                    "item"
+                )
+            , onClick ClearNotices
+            ]
+            [ text "May" ]
+        , a
+            [ class
+                (if model.notice == ShowHelp then
+                    "active item"
+
+                 else
+                    "item"
+                )
+            , onClick ShowHelpNotice
+            ]
+            [ text "Help" ]
         , ul [ class "right menu" ]
             (li [ class "item" ] [ text status ]
                 :: (case model.authState of
@@ -720,15 +1001,59 @@ viewHeader model =
                             ]
 
                         _ ->
-                            [ a
-                                [ href "https://auth.may.hazelfire.net/oauth2/authorize?client_id=1qu0jlg90401pc5lf41jukbd15&redirect_uri=https://may.hazelfire.net/&response_type=code&scopes=account.delete%20nodes.read%20nodes.write%20subscription.read%20account.delete"
-                                , class "item green"
+                            [ li
+                                [ class "item"
                                 ]
-                                [ text "Login" ]
+                                [ button [ class "ui button grey", onClick LogInConfirm ] [ text "Login" ] ]
                             ]
                    )
             )
         ]
+
+
+monthToNumber : Time.Month -> Int
+monthToNumber month =
+    case month of
+        Time.Jan ->
+            1
+
+        Time.Feb ->
+            2
+
+        Time.Mar ->
+            3
+
+        Time.Apr ->
+            4
+
+        Time.May ->
+            5
+
+        Time.Jun ->
+            6
+
+        Time.Jul ->
+            7
+
+        Time.Aug ->
+            8
+
+        Time.Sep ->
+            9
+
+        Time.Oct ->
+            10
+
+        Time.Nov ->
+            11
+
+        Time.Dec ->
+            12
+
+
+formatTime : Time.Zone -> Time.Posix -> String
+formatTime here time =
+    String.fromInt (Time.toDay here time) ++ "/" ++ String.fromInt (monthToNumber <| Time.toMonth here time)
 
 
 viewTodo : Maybe Time.Zone -> Maybe Time.Posix -> List Task -> Html Msg
@@ -740,51 +1065,61 @@ viewTodo hereM nowM tasks =
                     Statistics.labelTasks here now tasks
 
                 addDurations =
-                    List.map (\x -> ( x, Just (Task.duration x) ))
+                    List.map (\x -> ( x, showHours (Task.duration x) ))
+
+                addPercentages =
+                    List.map (\( x, p ) -> ( x, showPercentage p ))
 
                 addNothing =
-                    List.map (\x -> ( x, Nothing ))
+                    List.map (\x -> ( x, "" ))
 
-                mapJustSecond =
-                    List.map (\( x, a ) -> ( x, Just a ))
+                addDueDates =
+                    List.map (\{ task, end } -> ( task, formatTime here end ))
 
                 sections =
                     if List.length labeledTasks.overdue > 0 then
-                        [ viewTodoSection "red" "Overdue" (addDurations labeledTasks.overdue) ]
+                        [ viewTodoSection "red" "Overdue" (addNothing labeledTasks.overdue) ]
 
                     else
                         []
 
                 sectionsToday =
                     if List.length labeledTasks.doToday > 0 then
-                        viewTodoSection "orange" "Do Today" (addDurations labeledTasks.doToday) :: sections
+                        viewTodoSection "orange" "Do Today" (addPercentages labeledTasks.doToday) :: sections
 
                     else
                         sections
 
                 sectionsSoon =
                     if List.length labeledTasks.doSoon > 0 then
-                        viewTodoSection "green" "Do Soon" (mapJustSecond labeledTasks.doSoon) :: sectionsToday
+                        viewTodoSection "green" "Do Soon" (addDueDates labeledTasks.doSoon) :: sectionsToday
 
                     else
                         sectionsToday
 
                 sectionsDoLater =
                     if List.length labeledTasks.doLater > 0 then
-                        viewTodoSection "blue" "Do Later" (addNothing labeledTasks.doLater) :: sectionsSoon
+                        viewTodoSection "purple" "Do Later" (addDueDates labeledTasks.doLater) :: sectionsSoon
 
                     else
                         sectionsSoon
+
+                sectionsNoInfo =
+                    if List.length labeledTasks.noDue > 0 then
+                        viewTodoSection "blue" "No Info" (addNothing labeledTasks.noDue) :: sectionsDoLater
+
+                    else
+                        sectionsDoLater
 
                 doneToday =
                     Statistics.doneToday here now tasks
 
                 allSections =
                     if List.length doneToday > 0 then
-                        viewTodoSection "black" "Done today" (addDurations doneToday) :: sectionsDoLater
+                        viewTodoSection "black" "Done today" (addDurations doneToday) :: sectionsNoInfo
 
                     else
-                        sectionsSoon
+                        sectionsNoInfo
             in
             div [ class "todo" ]
                 (List.reverse allSections)
@@ -793,30 +1128,22 @@ viewTodo hereM nowM tasks =
             div [] [ text "loading" ]
 
 
-viewTodoSection : String -> String -> List ( Task, Maybe Float ) -> Html Msg
-viewTodoSection color title tasks =
-    let
-        sortedTasks =
-            List.sortBy (\( _, a ) -> -(Maybe.withDefault 0 a)) tasks
-    in
-    div []
-        (h3 [ class <| "ui header " ++ color ] [ text title ]
-            :: List.map
-                (\( task, urgency ) ->
-                    let
-                        label =
-                            case urgency of
-                                Just u ->
-                                    showHours u ++ " (" ++ String.fromInt (floor (u / Task.duration task * 100)) ++ "%): "
+showPercentage : Float -> String
+showPercentage amount =
+    String.fromInt (floor (amount * 100)) ++ "%"
 
-                                Nothing ->
-                                    ""
-                    in
+
+viewTodoSection : String -> String -> List ( Task, String ) -> Html Msg
+viewTodoSection color title tasks =
+    div []
+        (h3 [ class <| "ui header todosectionheader " ++ color ] [ text title ]
+            :: List.map
+                (\( task, label ) ->
                     div [ class "todoitem" ]
-                        [ a [ onClick (SetView (ViewIdTask (Task.id task))) ] [ text <| label ++ Task.name task ]
+                        [ a [ onClick (SetView (ViewIdTask (Task.id task))), class "clickable" ] [ text <| label ++ " " ++ Task.name task ]
                         ]
                 )
-                sortedTasks
+                tasks
         )
 
 
@@ -848,18 +1175,21 @@ viewStatistics hereM nowM tasks =
     case ( hereM, nowM ) of
         ( Just here, Just now ) ->
             div [ class "ui statistics" ]
-                [ viewStatistic "Done today" (showHours <| List.sum (List.map Task.duration (Statistics.doneToday here now tasks)))
-                , viewStatistic "Urgency" (showHours <| Statistics.urgency here now tasks)
-                , viewStatistic "Tomorrow" (showHours <| Statistics.urgency here (tomorrow now) tasks)
+                [ viewStatistic ViewUrgency "Done today" (showHours <| List.sum (List.map Task.duration (Statistics.doneToday here now tasks)))
+                , viewStatistic ViewUrgency "Urgency" <| (showHours <| Statistics.urgency here now tasks)
+                , viewStatistic ViewUrgency "Tomorrow" (showHours <| Statistics.urgency here (tomorrow now) tasks)
                 ]
 
         _ ->
             div [] [ text "Loading" ]
 
 
-viewStatistic : String -> String -> Html msg
-viewStatistic label value =
-    div [ class "ui small statistic" ] [ div [ class "value" ] [ text value ], div [ class "label" ] [ text label ] ]
+viewStatistic : msg -> String -> String -> Html msg
+viewStatistic msg label value =
+    div [ class "ui small statistic clickable", onClick msg ]
+        [ div [ class "value" ] [ text value ]
+        , div [ class "label" ] [ text label ]
+        ]
 
 
 viewButton : String -> String -> msg -> Html msg
@@ -1134,7 +1464,7 @@ editableField editing elementId name currentlyEditingMsg workingMsg setValue =
         div [ class "ui input editablefield" ] [ input [ id elementId, onEnter (setValue name), onBlur (setValue name), onInput workingMsg, value name ] [] ]
 
     else
-        span [ onClick currentlyEditingMsg ] [ text name ]
+        span [ onClick currentlyEditingMsg, class "clickable" ] [ text name ]
 
 
 viewBackButton : Maybe (Id Folder) -> Html Msg
@@ -1200,6 +1530,9 @@ labelToColor label =
             "green"
 
         Statistics.DoLater ->
+            "purple"
+
+        Statistics.NoDue ->
             "blue"
 
         Statistics.Done ->

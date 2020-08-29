@@ -1,11 +1,16 @@
 module May.Statistics exposing
     ( Label(..)
+    , LabeledTask
     , LabeledTasks
+    , TaskGroup
     , doneToday
+    , doneTodayAndLater
     , dueDateRecommendations
+    , endOfDay
     , folderLabelWithId
     , groupTasks
     , labelTasks
+    , startOfDay
     , taskLabelWithId
     , taskUrgency
     , todo
@@ -54,31 +59,16 @@ you can track your progress
 urgency : Time.Zone -> Time.Posix -> List Task -> Float
 urgency here now tasks =
     let
-        ( donetoday_, notDoneToday ) =
-            List.partition (isDoneToday here now) tasks
-
-        pretendingNotDone =
-            List.map (Task.setDoneOn Nothing) donetoday_ ++ notDoneToday
-
-        taskLabels =
-            labelTasks here now pretendingNotDone
-
-        doTodayTime =
-            List.sum (List.map Task.duration (taskLabels.overdue ++ taskLabels.doToday))
-
-        doSoonTime =
-            List.sum (List.map Tuple.second taskLabels.doSoon)
+        incomplete =
+            doneTodayAndLater here now tasks
     in
-    doSoonTime + doTodayTime
+    case groupTasks here now incomplete of
+        [] ->
+            0
 
-
-type alias LabeledTasks =
-    { overdue : List Task
-    , doToday : List Task
-    , doSoon : List ( Task, Float )
-    , doLater : List Task
-    , done : List Task
-    }
+        group :: _ ->
+            -- urgency in groups must be strictly decreasing. So this one is the actual urgency
+            group.urgency
 
 
 isJust : Maybe a -> Bool
@@ -112,14 +102,14 @@ groupTasks : Time.Zone -> Time.Posix -> List Task -> List TaskGroup
 groupTasks here now tasks =
     let
         isNotDoneWithDueDate task =
-            case ( Task.due task, Task.doneOn task, Task.duration task ) of
-                ( Just _, Nothing, duration ) ->
+            case ( Task.due task, Task.duration task ) of
+                ( Just _, duration ) ->
                     duration > 0
 
                 _ ->
                     False
 
-        ( _, incomplete ) =
+        ( incomplete, _ ) =
             List.partition isNotDoneWithDueDate tasks
 
         sortedTasks =
@@ -131,12 +121,24 @@ groupTasks here now tasks =
     List.reverse <| groupTasks_ sod sortedTasks []
 
 
-dueDateRecommendations : Time.Zone -> Time.Posix -> List Task -> List ( Time.Posix, Task )
+type alias LabeledTask =
+    { task : Task
+    , start : Time.Posix
+    , end : Time.Posix
+    , urgency : Float
+    }
+
+
+{-| The pair of dates are: (recommended start, recommended end). The reason I have
+recommended start is that it's possible to calculate the percentage you should complete today
+from this value.
+-}
+dueDateRecommendations : Time.Zone -> Time.Posix -> List Task -> List LabeledTask
 dueDateRecommendations here now tasks =
     dueDateRecommendations_ now (groupTasks here now tasks)
 
 
-dueDateRecommendations_ : Time.Posix -> List TaskGroup -> List ( Time.Posix, Task )
+dueDateRecommendations_ : Time.Posix -> List TaskGroup -> List LabeledTask
 dueDateRecommendations_ now groups =
     case groups of
         [] ->
@@ -162,11 +164,11 @@ dueDateRecommendations_ now groups =
                                 fullWidth =
                                     Time.posixToMillis dueDate - Time.posixToMillis group.start
                             in
-                            interpolateDue group.start fullWidth fullDuration 0 (List.reverse group.tasks) ++ dueDateRecommendations_ dueDate restGroups
+                            interpolateDue group.urgency group.start fullWidth fullDuration 0 (List.reverse group.tasks) ++ dueDateRecommendations_ dueDate restGroups
 
 
-interpolateDue : Time.Posix -> Int -> Float -> Float -> List Task -> List ( Time.Posix, Task )
-interpolateDue start width fullDuration durationSoFar tasks =
+interpolateDue : Float -> Time.Posix -> Int -> Float -> Float -> List Task -> List LabeledTask
+interpolateDue groupUrgency start width fullDuration durationSoFar tasks =
     case tasks of
         [] ->
             []
@@ -176,10 +178,24 @@ interpolateDue start width fullDuration durationSoFar tasks =
                 currentDuration =
                     durationSoFar + Task.duration task
 
+                proportionThroughLast =
+                    durationSoFar / fullDuration
+
                 proportionThrough =
                     currentDuration / fullDuration
+
+                recommendedStart =
+                    Time.millisToPosix (floor (proportionThroughLast * toFloat width + toFloat (Time.posixToMillis start)))
+
+                recommendedDue =
+                    Time.millisToPosix (floor (proportionThrough * toFloat width + toFloat (Time.posixToMillis start)))
             in
-            ( Time.millisToPosix (floor (proportionThrough * toFloat width + toFloat (Time.posixToMillis start))), task ) :: interpolateDue start width fullDuration currentDuration restTasks
+            { task = task
+            , start = recommendedStart
+            , end = recommendedDue
+            , urgency = groupUrgency
+            }
+                :: interpolateDue groupUrgency start width fullDuration currentDuration restTasks
 
 
 groupTasks_ : Time.Posix -> List Task -> List TaskGroup -> List TaskGroup
@@ -196,27 +212,23 @@ groupTasks_ now tasks groups =
                 newStart =
                     case Task.due task of
                         Just d ->
-                            d
+                            if Time.posixToMillis d < Time.posixToMillis now then
+                                now
+
+                            else
+                                d
 
                         Nothing ->
+                            -- This should not be possible, it's assued that all tasks have a due date
                             Time.millisToPosix 0
-
-                -- This should not be possible, it's assued that all tasks have a due date
             in
             case groups of
                 [] ->
                     -- Fantastic! If there are no groups yet, this task can make our first group
                     groupTasks_ newStart rest [ newTaskGroup ]
 
-                lastGroup :: restGroups ->
-                    -- Now, the golden question is, is the urgency to this group smaller than the last?
-                    if lastGroup.urgency > newTaskGroup.urgency then
-                        -- If so, then we can also just add this group to the list
-                        groupTasks_ newStart rest (newTaskGroup :: lastGroup :: restGroups)
-
-                    else
-                        -- Otherwise, we need to merge the groups
-                        groupTasks_ newStart rest (balanceTaskGroups (newTaskGroup :: lastGroup :: restGroups))
+                groups_ ->
+                    groupTasks_ newStart rest (balanceTaskGroups (newTaskGroup :: groups_))
 
 
 {-| This makes the task groups the smallest possible that satisfies the constraint
@@ -226,8 +238,8 @@ balanceTaskGroups : List TaskGroup -> List TaskGroup
 balanceTaskGroups unbalanced =
     case unbalanced of
         first :: second :: rest ->
-            if first.urgency < second.urgency then
-                balanceTaskGroups (mergeTaskGroups first second :: rest)
+            if first.urgency > second.urgency then
+                balanceTaskGroups (mergeTaskGroups second first :: rest)
 
             else
                 first :: second :: rest
@@ -248,7 +260,7 @@ mergeTaskGroups first second =
         fullHours =
             List.sum <| List.map Task.duration (first.tasks ++ second.tasks)
     in
-    { urgency = max fullHours (fullHours / (toFloat fullWidth / 1000 / 60 / 60 / 24)) -- urgency cannot be larger than the duration of the tasks
+    { urgency = min fullHours (fullHours / (toFloat fullWidth / 1000 / 60 / 60 / 24)) -- urgency cannot be larger than the duration of the tasks
     , start = first.start
     , tasks = second.tasks ++ first.tasks -- Order here is important, I want the last tasks to come first
     }
@@ -291,22 +303,101 @@ newGroup start task =
     }
 
 
-labelTasks : Time.Zone -> Time.Posix -> List Task -> LabeledTasks
-labelTasks here now tasks =
+type alias LabeledTasks =
+    { overdue : List Task
+    , doToday : List ( Task, Float )
+    , doSoon : List LabeledTask
+    , doLater : List LabeledTask
+    , noDue : List Task
+    , done : List Task
+    }
+
+
+doneTodayAndLater : Time.Zone -> Time.Posix -> List Task -> List Task
+doneTodayAndLater here now tasks =
     let
         ( done, incomplete ) =
             List.partition (Task.doneOn >> isJust) tasks
 
-        sortedTasks =
-            List.sortBy (\x -> Maybe.withDefault 0 (Maybe.map Time.posixToMillis (Task.due x))) incomplete
+        doneToday_ =
+            List.filter (isDoneToday here now) done
+    in
+    doneToday_ ++ incomplete
+
+
+endOfDay : Time.Zone -> Time.Posix -> Time.Posix
+endOfDay here now =
+    Time.millisToPosix <| Time.posixToMillis (startOfDay here now) + 1000 * 60 * 60 * 24
+
+
+labelTasks : Time.Zone -> Time.Posix -> List Task -> LabeledTasks
+labelTasks here now tasks =
+    let
+        incomplete =
+            doneTodayAndLater here now tasks
+
+        done =
+            List.filter (Task.doneOn >> isJust) tasks
+
+        ( hasDue, noDue ) =
+            List.partition
+                (\task ->
+                    case ( Task.duration task, Task.due task ) of
+                        ( duration, Just _ ) ->
+                            duration > 0
+
+                        _ ->
+                            False
+                )
+                incomplete
 
         sod =
             startOfDay here now
 
-        labeledTasks =
-            labelTasks_ sod sod 0 0 sortedTasks
+        reccomendations =
+            dueDateRecommendations here sod hasDue
+
+        notDone =
+            List.filter (.task >> isDoneToday here now >> not) reccomendations
+
+        isOverdue task =
+            case Task.due task of
+                Just due ->
+                    Time.posixToMillis due < Time.posixToMillis now
+
+                _ ->
+                    False
+
+        ( overdue, upcoming ) =
+            List.partition (.task >> isOverdue) notDone
+
+        eod =
+            endOfDay here now
+
+        isDueToday { start } =
+            Time.posixToMillis start < Time.posixToMillis eod
+
+        ( doToday, doAfterToday ) =
+            List.partition isDueToday upcoming
+
+        maxUrgency =
+            Maybe.map .urgency <| List.head doAfterToday
+
+        ( doSoon, doLater ) =
+            List.partition (.urgency >> Just >> (==) maxUrgency) doAfterToday
+
+        rangeToPercentage { task, start, end } =
+            let
+                percentageDone =
+                    if Time.posixToMillis end <= Time.posixToMillis eod then
+                        1
+
+                    else
+                        toFloat (Time.posixToMillis eod - Time.posixToMillis start) / toFloat (Time.posixToMillis end - Time.posixToMillis start)
+            in
+            ( task, percentageDone )
     in
-    { labeledTasks | done = done }
+    { done = done, noDue = noDue, doSoon = doSoon, doLater = doLater, doToday = List.map rangeToPercentage doToday, overdue = List.map .task overdue }
 
 
 startOfDay : Time.Zone -> Time.Posix -> Time.Posix
@@ -342,88 +433,12 @@ doneToday zone time tasks =
     List.filter (isDoneToday zone time) tasks
 
 
-labelTasks_ : Time.Posix -> Time.Posix -> Float -> Float -> List Task -> LabeledTasks
-labelTasks_ now last_due residual currentUrgency tasks =
-    case tasks of
-        task :: rest ->
-            case Task.due task of
-                Just dueDate ->
-                    let
-                        timeUntilDueInDays =
-                            toFloat (Time.posixToMillis dueDate - Time.posixToMillis now) / 1000 / 60 / 60 / 24
-
-                        timeUntilDueInDaysCapped =
-                            max timeUntilDueInDays 1
-                    in
-                    if timeUntilDueInDays <= 0.0 then
-                        let
-                            newUrgency =
-                                Task.duration task + currentUrgency
-
-                            otherLabels =
-                                labelTasks_ now now 0 newUrgency rest
-                        in
-                        { otherLabels | overdue = task :: otherLabels.overdue }
-
-                    else if timeUntilDueInDays <= 1.0 then
-                        let
-                            newUrgency =
-                                Task.duration task + currentUrgency
-
-                            otherLabels =
-                                labelTasks_ now dueDate 0 newUrgency rest
-                        in
-                        { otherLabels | doToday = task :: otherLabels.doToday }
-
-                    else
-                        let
-                            addedResidual =
-                                toFloat (Time.posixToMillis dueDate - Time.posixToMillis last_due) / 1000 / 60 / 60 / 24 * currentUrgency + residual
-                        in
-                        if addedResidual >= Task.duration task then
-                            let
-                                newResidual =
-                                    addedResidual - Task.duration task
-
-                                otherLabels =
-                                    labelTasks_ now dueDate newResidual currentUrgency rest
-                            in
-                            { otherLabels | doLater = task :: otherLabels.doLater }
-
-                        else
-                            let
-                                restOfTaskDuration =
-                                    Task.duration task - addedResidual
-
-                                newUrgency =
-                                    currentUrgency + restOfTaskDuration / timeUntilDueInDaysCapped
-
-                                otherLabels =
-                                    labelTasks_ now dueDate 0 newUrgency rest
-                            in
-                            { otherLabels | doSoon = ( task, restOfTaskDuration / timeUntilDueInDaysCapped ) :: otherLabels.doSoon }
-
-                Nothing ->
-                    let
-                        otherLabels =
-                            labelTasks_ now last_due residual currentUrgency rest
-                    in
-                    { otherLabels | doLater = task :: otherLabels.doLater }
-
-        [] ->
-            { doLater = []
-            , doToday = []
-            , doSoon = []
-            , overdue = []
-            , done = []
-            }
-
-
 type Label
     = Overdue
     | DoToday
     | DoSoon
     | DoLater
+    | NoDue
     | Done
 
 
@@ -432,14 +447,17 @@ taskLabelWithId taskLabels taskId =
     if List.any (Task.id >> (==) taskId) taskLabels.overdue then
         Overdue
 
-    else if List.any (Task.id >> (==) taskId) taskLabels.doToday then
+    else if List.any (Tuple.first >> Task.id >> (==) taskId) taskLabels.doToday then
         DoToday
 
-    else if List.any (Tuple.first >> Task.id >> (==) taskId) taskLabels.doSoon then
+    else if List.any (.task >> Task.id >> (==) taskId) taskLabels.doSoon then
         DoSoon
 
-    else if List.any (Task.id >> (==) taskId) taskLabels.doLater then
+    else if List.any (.task >> Task.id >> (==) taskId) taskLabels.doLater then
         DoLater
+
+    else if List.any (Task.id >> (==) taskId) taskLabels.noDue then
+        NoDue
 
     else
         Done
@@ -463,14 +481,17 @@ folderLabelWithId taskLabels folderId fs =
     if List.any taskHasParent taskLabels.overdue then
         Overdue
 
-    else if List.any taskHasParent taskLabels.doToday then
+    else if List.any (Tuple.first >> taskHasParent) taskLabels.doToday then
         DoToday
 
-    else if List.any (Tuple.first >> taskHasParent) taskLabels.doSoon then
+    else if List.any (.task >> taskHasParent) taskLabels.doSoon then
         DoSoon
 
-    else if List.any taskHasParent taskLabels.doLater then
+    else if List.any (.task >> taskHasParent) taskLabels.doLater then
         DoLater
+
+    else if List.any taskHasParent taskLabels.noDue then
+        NoDue
 
     else
         Done

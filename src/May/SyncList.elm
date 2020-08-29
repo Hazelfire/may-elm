@@ -20,7 +20,7 @@ import Api.Enum.PatchCommandType
 import Api.InputObject
 import Api.Mutation as Mutation
 import Api.Object
-import Api.Object.PatchNodeResponse
+import Api.Object.OkResult
 import CustomScalarCodecs
 import Graphql.Operation as Graphql
 import Graphql.OptionalArgument as Graphql
@@ -183,9 +183,9 @@ syncListMutation list =
     Mutation.patchNodes { args = List.map mapPatchCommand list } responseSelectionSet
 
 
-responseSelectionSet : Graphql.SelectionSet Bool Api.Object.PatchNodeResponse
+responseSelectionSet : Graphql.SelectionSet Bool Api.Object.OkResult
 responseSelectionSet =
-    Api.Object.PatchNodeResponse.ok
+    Api.Object.OkResult.ok
 
 
 mapPatchCommand : SyncAction -> Api.InputObject.PatchCommand

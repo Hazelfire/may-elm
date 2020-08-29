@@ -105,3 +105,44 @@ body {
 .left-padded {
   padding-left : 2em !important;
 }
+.notice {
+  text-align: center;
+  padding-left: 2em;
+  padding-top: 2em;
+  padding-bottom: 2em;
+}
+
+.noticecontent {
+  text-align: left;
+  display: inline-block;
+  max-width: 50em;
+}
+.todosectionheader {
+  margin-top: 1rem !important;
+  margin-bottom: 0px !important;
+}
+.clickable {
+  cursor: pointer;
+}
+
+.urgencyboxes {
+  fill: rgb(255,255,255);
+  stroke-width: 1;
+  stroke: rgb(0,0,0);
+}
+.dosoonbox {
+  fill: #21ba45 !important;
+}
+
+.dolaterbox {
+  fill: #a333c8 !important;
+}
+.dotodaybox {
+  fill: #f2711c !important;
+}
+.donebox {
+  fill: #555555 !important;
+}
+.urgencynotice {
+  text-align: left;
+}

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#800080" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
+    <link rel="stylesheet" href="/css/index.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+    <script src = "main.js" ></script>
+    <script src="https://js.stripe.com/v3/"></script>
+  <script>
+      if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('/sw.js').then(function(registration) {
+        // Success in registration
+      }, function(err) {
+        // Fail in registration
+      });
+    });
+  }
+
+  </script>
+    <title>May Privacy</title>
+</head>
+<body>
+  <div class="notice"> 
+    <div class="noticecontent"> 
+      <h1>May Privacy Policy</h1>
+      <p>I very much value your privacy. This document outlines how we protect the information that you may provide to us when using May.</p>
+      <h3>Using May Without a subscription</h3>
+      <p>When using May out a subscription, our site collects almost no data on you. You are not tracked, we do not use any form of cookies or site analytics. Your tasks and folders are stored locally on your device and are not sent anywhere. The only data that I do collect is site traffic, that is, how many people are using my site.</p>
+      <h3>Using May with a subscription</h3>
+      <p>When using May with a subscription, May will collect your email address and name. I will not share your email with others, and will not contact you for marketing reasons. I will contact you if there is information regarding your service that you should know about. Your email, name and password are securely stored in Amazon Web Services.</p>
+      <p>To handle payments, I use the payment service <a href="https://stripe.com/">Stripe</a>. May do not store credit card details, nor does May ever have any contact with your credit card details. Stripe stores your payment information and you can read their <a href="https://stripe.com/en-au/privacy" >privacy policy here</a>.</p>
+      <p>May will also store your tasks and folders so that it can sync your tasks between your devices. Your data is stored in a database hosted by Amazon Web Services. It is encrypted in transit and encrypted at rest.</p>
+      <h3>Changes to this policy</h3>
+      <p>This privacy policy might change. If it does, we will notify you through the application. By using the application you agree to the privacy policy.</p>
+      <h3>Contact</h3>
+      <p>If you have any questions in regards to this policy, you can contact Sam Nolan at <a href="mailto:sam@hazelfire.net">sam@hazelfire.net</a>.</p>
+    </div>
+  </div> 
+</body> 
+</html>

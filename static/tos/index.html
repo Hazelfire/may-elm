@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#800080" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
+    <link rel="stylesheet" href="/css/index.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+    <script src = "main.js" ></script>
+    <script src="https://js.stripe.com/v3/"></script>
+  <script>
+      if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('/sw.js').then(function(registration) {
+        // Success in registration
+      }, function(err) {
+        // Fail in registration
+      });
+    });
+  }
+
+  </script>
+    <title>May Terms of Service</title>
+</head>
+<body>
+  <div class="notice"> 
+    <div class="noticecontent"> 
+      <h1>May Terms of Service</h1>
+      <p>In this document, <b>I</b> refers to Sam Nolan, the developer of this service</p>
+      <h3>May does not come with warranties</h3>
+      <p><b>
+        I provide this service “as is” and “as available”, without any express, implied, or statutory warranties of title, merchantability, fitness for a particular purpose, noninfringement, or any other type of warranty or guarantee. No data, documentation or any other information provided by May or obtained by you from or through the service creates or implies any warranty from a stripe entity to you.</b></p>
+      <p><b>
+        I disclaim any knowledge of, and do not guarantee: (A) the accuracy, reliability, or correctness of any data provided through the service; (B) that the service will meet your specific business needs or requirements; (C) that the service will be available at any particular time or location, or will function in an uninterrupted manner or be secure; (D) that stripe will correct any defects or errors in the service, documentation, or data; or (E) that the service are free of viruses or other harmful code. Use of data you access or download through the service is done at your own risk — you are solely responsible for any damage to your property, loss of data, or any other loss that results from such access or download. You understand that the I make no guarantees to you regarding transaction processing times or payout schedules.</b></p>
+      <p><b>
+        Nothing in this agreement operates to exclude, restrict or modify the application of any implied condition, warranty or guarantee, or the exercise of any right or remedy, or the imposition of any liability under law where to do so would: (a) contravene that law; or (b) cause any term of this agreement to be void.</b></p>
+      <h3>Contact</h3>
+      <p>If you have any questions in regards to the terms of service, you can contact Sam Nolan at <a href="mailto:sam@hazelfire.net">sam@hazelfire.net</a>.</p>
+    </div>
+  </div> 
+</body> 
+</html>
