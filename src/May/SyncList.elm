@@ -9,6 +9,7 @@ module May.SyncList exposing
     , empty
     , encode
     , needsSync
+    , remove25
     , syncListMutation
     )
 
@@ -178,9 +179,42 @@ deleteNode id sl =
     SyncDelete id :: filterOutId id sl
 
 
+firstN : Int -> List a -> List a
+firstN size list =
+    case ( size, list ) of
+        ( 0, _ ) ->
+            []
+
+        ( _, head :: rest ) ->
+            head :: firstN (size - 1) rest
+
+        ( _, [] ) ->
+            []
+
+
+tailN : Int -> List a -> List a
+tailN size list =
+    case ( size, list ) of
+        ( 0, _ ) ->
+            list
+
+        ( _, _ :: rest ) ->
+            firstN (size - 1) rest
+
+        ( _, [] ) ->
+            []
+
+
+remove25 : SyncList -> SyncList
+remove25 =
+    tailN 25
+
+
+{-| DynamoDB only accepts 25 requests at a time
+-}
 syncListMutation : SyncList -> Graphql.SelectionSet Bool Graphql.RootMutation
 syncListMutation list =
-    Mutation.patchNodes { args = List.map mapPatchCommand list } responseSelectionSet
+    Mutation.patchNodes { args = List.map mapPatchCommand (firstN 25 list) } responseSelectionSet
 
 
 responseSelectionSet : Graphql.SelectionSet Bool Api.Object.OkResult

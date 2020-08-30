@@ -21,6 +21,7 @@ module May.FileSystem exposing
     , mapOnTask
     , needsSync
     , new
+    , setSyncList
     , syncList
     , syncListAll
     , taskParent
@@ -625,7 +626,12 @@ nodeDecoder =
 
 updateFS : FSUpdate -> FileSystem -> FileSystem
 updateFS (FSUpdate update) (FileSystem fs) =
-    FileSystem { fs | nodes = applySyncList fs.syncList update }
+    case update of
+        [] ->
+            FileSystem fs
+
+        list ->
+            FileSystem { fs | nodes = applySyncList fs.syncList list }
 
 
 {-| Applies the sync list to the remote locally. Ensuring that the current state
@@ -705,6 +711,11 @@ syncListAll (FileSystem fs) =
                 fs.nodes
     in
     FileSystem { fs | syncList = newSyncList }
+
+
+setSyncList : SyncList -> FileSystem -> FileSystem
+setSyncList list (FileSystem fs) =
+    FileSystem { fs | syncList = list }
 
 
 folderHasAncestor : Id Folder -> Id Folder -> FileSystem -> Bool

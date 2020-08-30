@@ -503,7 +503,17 @@ update message model =
             pure <| { model | syncStatus = UpdateFailed }
 
         GotUpdateSuccess (Ok _) ->
-            pure <| { model | syncStatus = Synced, fs = FileSystem.emptySyncList model.fs }
+            let
+                newSyncList =
+                    SyncList.remove25 (FileSystem.syncList model.fs)
+            in
+            if SyncList.needsSync newSyncList then
+                withTokens model <|
+                    \tokens ->
+                        ( { model | syncStatus = Synced, fs = FileSystem.setSyncList newSyncList model.fs }, sendSyncList tokens newSyncList )
+
+            else
+                pure <| { model | syncStatus = Synced, fs = FileSystem.emptySyncList model.fs }
 
         Logout ->
             saveToLocalStorage <| { model | syncStatus = SyncOffline, authState = Auth.Unauthenticated }
@@ -720,7 +730,7 @@ view model =
                             viewFolderDetails here now folderView model.fs
 
                         ViewTypeTask taskView ->
-                            viewTaskDetails now taskView model.fs
+                            viewTaskDetails here now taskView model.fs
 
                         ViewTypeStatistics ->
                             viewStatisticsDetails here now model
@@ -816,7 +826,7 @@ viewNotice model =
                     , p [] [ text "Any task that you complete today goes in the Done Today list." ]
                     , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
                     , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
-                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, for which I donate $5 to Ethical Altruism Australia. There is no such thing as a free account on May." ]
+                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, for which I donate $5 to ", a [ href "https://effectivealtruism.org.au/", target "_blank" ] [ text "Effective Altruism Australia" ], text ". There is no such thing as a free account on May." ]
                     , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
                     , h5 [] [ text "Privacy and Terms of Service" ]
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
@@ -993,21 +1003,29 @@ viewHeader model =
             ]
             [ text "Help" ]
         , ul [ class "right menu" ]
-            (li [ class "item" ] [ text status ]
-                :: (case model.authState of
-                        Auth.Authenticated _ ->
-                            [ li [ class "item" ] [ button [ class "ui button red", onClick ConfirmDeleteAccount ] [ text "Delete Account" ] ]
-                            , li [ class "item" ] [ button [ class "ui button grey", onClick Logout ] [ text "Logout" ] ]
-                            ]
-
-                        _ ->
-                            [ li
-                                [ class "item"
+            [ li [ class "item" ] [ text status ]
+            , li [ class "item" ]
+                [ div
+                    [ class <|
+                        "ui simple dropdown"
+                    ]
+                    [ text "Account"
+                    , viewIcon "dropdown"
+                    , div [ class "menu" ]
+                        (case model.authState of
+                            Auth.Authenticated _ ->
+                                [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                                , div [ class "item", onClick Logout ] [ text "Logout" ]
                                 ]
-                                [ button [ class "ui button grey", onClick LogInConfirm ] [ text "Login" ] ]
-                            ]
-                   )
-            )
+
+                            _ ->
+                                [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
+                                , a [ class "item", href Urls.loginUrl ] [ text "Login" ]
+                                ]
+                        )
+                    ]
+                ]
+            ]
         ]
 
 
@@ -1297,8 +1315,8 @@ viewFolderDetails here time folderView fs =
                 div [ class "ui header attached top" ] [ text "Could not find folder" ]
 
 
-viewTaskDetails : Time.Posix -> TaskView -> FileSystem -> Html Msg
-viewTaskDetails now taskView fs =
+viewTaskDetails : Time.Zone -> Time.Posix -> TaskView -> FileSystem -> Html Msg
+viewTaskDetails here now taskView fs =
     let
         taskId =
             taskView.id
@@ -1390,7 +1408,7 @@ viewTaskDetails now taskView fs =
                             [ div [ class "durationtitle" ] [ text "Duration" ]
                             , span [ class "durationvalue" ] [ editableField editingDuration "taskduration" durationText StartEditingTaskDuration ChangeTaskDuration (parseFloatMessage (SetTaskDuration taskId)) ]
                             , span [ class "durationlabel" ] [ text " hours" ]
-                            , viewDueField task
+                            , viewDueField here task
                             ]
                        ]
                 )
@@ -1401,18 +1419,21 @@ viewTaskDetails now taskView fs =
 
 parseDate : String -> Maybe Time.Posix
 parseDate date =
-    Iso8601.toTime (date ++ "T00:00:00")
+    Iso8601.toTime
+        (date
+            ++ "T23:59:59+10:00"
+        )
         |> Result.toMaybe
 
 
-viewDueField : Task -> Html Msg
-viewDueField task =
+viewDueField : Time.Zone -> Task -> Html Msg
+viewDueField zone task =
     case Task.due task of
         Just dueDate ->
             div []
                 [ div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked True, onClick (SetTaskDue (Task.id task) Nothing) ] [], label [] [ text "Remove Due Date" ] ]
                 , div [ class "ui input" ]
-                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix Time.utc dueDate)), onInput (restrictMessageMaybe (parseDate >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
+                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
                     ]
                 ]
 
