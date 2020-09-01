@@ -77,33 +77,21 @@ type SyncStatus
     | UpdateFailed
 
 
-type ViewId
-    = ViewIdFolder (Id Folder)
-    | ViewIdTask (Id Task)
-
-
 type ViewType
     = ViewTypeFolder FolderView
-    | ViewTypeTask TaskView
     | ViewTypeStatistics
-
-
-type alias TaskView =
-    { id : Id Task
-    , editing : TaskEditing
-    }
-
-
-type TaskEditing
-    = NotEditingTask
-    | EditingTaskName String
-    | EditingTaskDuration String
-    | ConfirmingDeleteTask
 
 
 type alias FolderView =
     { id : Id Folder
     , editing : FolderEditing
+    , taskEdit : TaskView
+    }
+
+
+type alias TaskView =
+    { id : Id Task
+    , editing : TaskEditing
     }
 
 
@@ -113,14 +101,16 @@ type FolderEditing
     | ConfirmingDeleteFolder
 
 
+type TaskEditing
+    = NotEditingTask
+    | EditingTaskName String
+    | EditingTaskDuration String
+    | ConfirmingDeleteTask
+
+
 newFolderView : Id Folder -> ViewType
 newFolderView id =
     ViewTypeFolder { id = id, editing = NotEditingFolder }
-
-
-newTaskView : Id Task -> ViewType
-newTaskView id =
-    ViewTypeTask { id = id, editing = NotEditingTask }
 
 
 type Msg
@@ -146,7 +136,7 @@ type Msg
     | SetTaskDueNow (Id Task)
     | SetTaskDue (Id Task) (Maybe Time.Posix)
     | SetTaskDoneOn (Id Task) (Maybe Time.Posix)
-    | SetView ViewId
+    | SetView (Id Folder)
     | SetTime Time.Posix
     | SetZone Time.Zone
     | ConfirmDeleteFolder
@@ -306,13 +296,8 @@ update message model =
                 Nothing ->
                     pure newModel
 
-        SetView vid ->
-            case vid of
-                ViewIdFolder fid ->
-                    pure <| { model | viewing = newFolderView fid }
-
-                ViewIdTask tid ->
-                    pure <| { model | viewing = newTaskView tid }
+        SetView fid ->
+            pure <| { model | viewing = newFolderView fid }
 
         StartEditingFolderName name ->
             withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName name)))) model
@@ -699,16 +684,6 @@ mapFileSystem func model =
     { model | fs = func model.fs }
 
 
-mapTaskView : (TaskView -> TaskView) -> ViewType -> ViewType
-mapTaskView func model =
-    case model of
-        ViewTypeTask taskView ->
-            ViewTypeTask <| func taskView
-
-        a ->
-            a
-
-
 mapFolderView : (FolderView -> FolderView) -> ViewType -> ViewType
 mapFolderView func model =
     case model of
@@ -728,9 +703,6 @@ view model =
                     case model.viewing of
                         ViewTypeFolder folderView ->
                             viewFolderDetails here now folderView model.fs
-
-                        ViewTypeTask taskView ->
-                            viewTaskDetails here now taskView model.fs
 
                         ViewTypeStatistics ->
                             viewStatisticsDetails here now model
@@ -1426,26 +1398,6 @@ parseDate date =
         |> Result.toMaybe
 
 
-viewDueField : Time.Zone -> Task -> Html Msg
-viewDueField zone task =
-    case Task.due task of
-        Just dueDate ->
-            div []
-                [ div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked True, onClick (SetTaskDue (Task.id task) Nothing) ] [], label [] [ text "Remove Due Date" ] ]
-                , div [ class "ui input" ]
-                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
-                    ]
-                ]
-
-        Nothing ->
-            div []
-                [ div [ class "ui checkbox" ]
-                    [ input [ type_ "checkbox", checked False, onClick (SetTaskDueNow <| Task.id task) ] []
-                    , label [] [ text "Include Due Date" ]
-                    ]
-                ]
-
-
 parseFloatMessage : (Float -> Msg) -> String -> Msg
 parseFloatMessage msg =
     restrictMessageMaybe String.toFloat msg
@@ -1525,7 +1477,7 @@ viewTaskList here time folderId fs =
         labeledTasks =
             List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) childrenTasks
     in
-    viewCards (List.map (\( task, label ) -> viewTaskCard label task) labeledTasks)
+    viewCards (List.map (\( task, label ) -> viewTaskCard here time label task) labeledTasks)
 
 
 viewCards : List (Html Msg) -> Html Msg
@@ -1566,7 +1518,77 @@ viewFolderCard label folder =
         [ div [ class "content" ] [ div [ class "header" ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ] ] ]
 
 
-viewTaskCard : Statistics.Label -> Task -> Html Msg
-viewTaskCard label task =
-    a [ class "ui card", onClick (SetView (ViewIdTask (Task.id task))) ]
-        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon <| "tasks " ++ labelToColor label, text (Task.name task) ] ] ]
+viewTaskCard : Time.Zone -> Time.Posix -> Statistics.Label -> Task -> Html Msg
+viewTaskCard zone now taskLabel task =
+    let
+        checkbox =
+            case Task.doneOn task of
+                Nothing ->
+                    div [ class "ui read-only checkbox right floated" ]
+                        [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) (Just now)), checked False ] []
+                        , label [] [ text "" ]
+                        ]
+
+                Just _ ->
+                    div [ class "ui checked read-only checkbox right floated" ]
+                        [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) Nothing), checked True ] []
+                        , label [] [ text "" ]
+                        ]
+
+        nameText =
+            case taskView.editing of
+                EditingTaskName name ->
+                    name
+
+                _ ->
+                    Task.name task
+
+        durationText =
+            case taskView.editing of
+                EditingTaskDuration duration ->
+                    duration
+
+                _ ->
+                    String.fromFloat (Task.duration task)
+
+        taskId =
+            Task.id task
+    in
+    div [ class "ui card" ]
+        [ div [ class "content" ]
+            [ checkbox
+            , div [ class "header" ]
+                [ viewIcon <| "tasks " ++ labelToColor taskLabel
+                , editableField editingName "foldername" nameText (StartEditingTaskName nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
+                ]
+            , div [ class "meta" ]
+                [ text "Duration: "
+                , input [ type_ "number" ] [ text (String.fromFloat (Task.duration task)) ]
+                ]
+            ]
+        , div [ class "content" ]
+            [ editableField editingDuration "taskduration" durationText StartEditingTaskDuration ChangeTaskDuration (parseFloatMessage (SetTaskDuration taskId))
+            ]
+        , div [ class "content" ]
+            [ viewDueField zone task ]
+        ]
+
+
+viewDueField : Time.Zone -> Task -> Html Msg
+viewDueField zone task =
+    case Task.due task of
+        Just dueDate ->
+            div []
+                [ div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked True, onClick (SetTaskDue (Task.id task) Nothing) ] [], label [] [ text "Remove Due Date" ] ]
+                , div [ class "ui input" ]
+                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
+                    ]
+                ]
+
+        Nothing ->
+            div []
+                [ div [ class "ui checkbox" ]
+                    [ input [ type_ "checkbox", checked False, onClick (SetTaskDueNow <| Task.id task) ] []
+                    , label [] [ text "Include Due Date" ]
+                    ]
+                ]

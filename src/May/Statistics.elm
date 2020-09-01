@@ -198,6 +198,24 @@ interpolateDue groupUrgency start width fullDuration durationSoFar tasks =
                 :: interpolateDue groupUrgency start width fullDuration currentDuration restTasks
 
 
+firstWith : (a -> Bool) -> List a -> ( List a, List a )
+firstWith func list =
+    case list of
+        [] ->
+            ( [], [] )
+
+        x :: xs ->
+            if func x then
+                let
+                    ( inlist, outlist ) =
+                        firstWith func xs
+                in
+                ( x :: inlist, outlist )
+
+            else
+                ( [], xs )
+
+
 groupTasks_ : Time.Posix -> List Task -> List TaskGroup -> List TaskGroup
 groupTasks_ now tasks groups =
     case tasks of
@@ -206,8 +224,19 @@ groupTasks_ now tasks groups =
 
         task :: rest ->
             let
+                due =
+                    case Task.due task of
+                        Just a ->
+                            a
+
+                        Nothing ->
+                            Time.millisToPosix 0
+
+                ( samedue, diffdue ) =
+                    firstWith (Task.due >> (==) (Task.due task)) rest
+
                 newTaskGroup =
-                    newGroup now task
+                    newGroup now (task :: samedue) due
 
                 newStart =
                     case Task.due task of
@@ -225,10 +254,10 @@ groupTasks_ now tasks groups =
             case groups of
                 [] ->
                     -- Fantastic! If there are no groups yet, this task can make our first group
-                    groupTasks_ newStart rest [ newTaskGroup ]
+                    groupTasks_ newStart diffdue [ newTaskGroup ]
 
                 groups_ ->
-                    groupTasks_ newStart rest (balanceTaskGroups (newTaskGroup :: groups_))
+                    groupTasks_ newStart diffdue (balanceTaskGroups (newTaskGroup :: groups_))
 
 
 {-| This makes the task groups the smallest possible that satisfies the constraint
@@ -238,11 +267,11 @@ balanceTaskGroups : List TaskGroup -> List TaskGroup
 balanceTaskGroups unbalanced =
     case unbalanced of
         first :: second :: rest ->
-            if first.urgency > second.urgency then
-                balanceTaskGroups (mergeTaskGroups second first :: rest)
+            if first.urgency < second.urgency then
+                first :: second :: rest
 
             else
-                first :: second :: rest
+                balanceTaskGroups (mergeTaskGroups second first :: rest)
 
         a ->
             -- A list with 0 or 1 item is already balanced
@@ -283,23 +312,15 @@ taskGroupLengthMillis { start, tasks } =
                     0
 
 
-newGroup : Time.Posix -> Task -> TaskGroup
-newGroup start task =
+newGroup : Time.Posix -> List Task -> Time.Posix -> TaskGroup
+newGroup start tasks due =
     let
-        due =
-            case Task.due task of
-                Just d ->
-                    d
-
-                Nothing ->
-                    Time.millisToPosix 0
-
         timeUntilDueInDaysCapped =
             max 1 <| toFloat (Time.posixToMillis due - Time.posixToMillis start) / 1000 / 60 / 60 / 24
     in
-    { urgency = Task.duration task / timeUntilDueInDaysCapped
+    { urgency = List.sum (List.map Task.duration tasks) / timeUntilDueInDaysCapped
     , start = start
-    , tasks = [ task ]
+    , tasks = tasks
     }
 
 
