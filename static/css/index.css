@@ -85,7 +85,7 @@ body {
   padding-left: 0.5em;
 }
 .editablefield {
-  width: 100%;
+  width: unset !important;
 }
 
 .top-menu {
@@ -137,12 +137,34 @@ body {
 .dolaterbox {
   fill: #a333c8 !important;
 }
+
 .dotodaybox {
   fill: #f2711c !important;
 }
+
 .donebox {
   fill: #555555 !important;
 }
+
+.overduebox {
+  fill: #db2828 !important;
+}
+
 .urgencynotice {
   text-align: left;
+}
+
+.durationfield {
+  margin-left: 1em;
+  max-width: 5rem !important;
+}
+.breadcrumbblock {
+  display: inline-block;
+}
+.urgencygraph {
+  max-width: 60em;
+}
+
+.urgencygraphcontainer {
+  text-align: center;
 }

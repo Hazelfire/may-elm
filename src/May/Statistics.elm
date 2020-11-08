@@ -102,8 +102,8 @@ groupTasks : Time.Zone -> Time.Posix -> List Task -> List TaskGroup
 groupTasks here now tasks =
     let
         isNotDoneWithDueDate task =
-            case ( Task.due task, Task.duration task ) of
-                ( Just _, duration ) ->
+            case ( isDoneToday here now task || (Task.doneOn task == Nothing && Task.due task /= Nothing), Task.duration task ) of
+                ( True, duration ) ->
                     duration > 0
 
                 _ ->
@@ -115,10 +115,10 @@ groupTasks here now tasks =
         sortedTasks =
             List.sortBy (\x -> Maybe.withDefault 0 (Maybe.map Time.posixToMillis (Task.due x))) incomplete
 
-        sod =
-            startOfDay here now
+        eoy =
+            endOfYesterday here now
     in
-    List.reverse <| groupTasks_ sod sortedTasks []
+    List.reverse <| groupTasks_ here eoy sortedTasks []
 
 
 type alias LabeledTask =
@@ -213,11 +213,11 @@ firstWith func list =
                 ( x :: inlist, outlist )
 
             else
-                ( [], xs )
+                ( [], x :: xs )
 
 
-groupTasks_ : Time.Posix -> List Task -> List TaskGroup -> List TaskGroup
-groupTasks_ now tasks groups =
+groupTasks_ : Time.Zone -> Time.Posix -> List Task -> List TaskGroup -> List TaskGroup
+groupTasks_ here now tasks groups =
     case tasks of
         [] ->
             groups
@@ -235,8 +235,11 @@ groupTasks_ now tasks groups =
                 ( samedue, diffdue ) =
                     firstWith (Task.due >> (==) (Task.due task)) rest
 
+                ( doneToday_, doneLater_ ) =
+                    List.partition (isDoneToday here now) (task :: samedue)
+
                 newTaskGroup =
-                    newGroup now (task :: samedue) due
+                    newGroup now (doneLater_ ++ doneToday_) due
 
                 newStart =
                     case Task.due task of
@@ -254,10 +257,10 @@ groupTasks_ now tasks groups =
             case groups of
                 [] ->
                     -- Fantastic! If there are no groups yet, this task can make our first group
-                    groupTasks_ newStart diffdue [ newTaskGroup ]
+                    groupTasks_ here newStart diffdue [ newTaskGroup ]
 
                 groups_ ->
-                    groupTasks_ newStart diffdue (balanceTaskGroups (newTaskGroup :: groups_))
+                    groupTasks_ here newStart diffdue (balanceTaskGroups (newTaskGroup :: groups_))
 
 
 {-| This makes the task groups the smallest possible that satisfies the constraint
@@ -325,30 +328,24 @@ newGroup start tasks due =
 
 
 type alias LabeledTasks =
-    { overdue : List Task
-    , doToday : List ( Task, Float )
+    { overdue : List LabeledTask
+    , doToday : List ( LabeledTask, Float )
     , doSoon : List LabeledTask
     , doLater : List LabeledTask
     , noDue : List Task
     , done : List Task
+    , doneToday : List LabeledTask
     }
 
 
 doneTodayAndLater : Time.Zone -> Time.Posix -> List Task -> List Task
 doneTodayAndLater here now tasks =
-    let
-        ( done, incomplete ) =
-            List.partition (Task.doneOn >> isJust) tasks
-
-        doneToday_ =
-            List.filter (isDoneToday here now) done
-    in
-    doneToday_ ++ incomplete
+    List.filter (\task -> isDoneToday here now task || Task.doneOn task == Nothing) tasks
 
 
 endOfDay : Time.Zone -> Time.Posix -> Time.Posix
 endOfDay here now =
-    Time.millisToPosix <| Time.posixToMillis (startOfDay here now) + 1000 * 60 * 60 * 24
+    Time.millisToPosix <| Time.posixToMillis (endOfYesterday here now) + 1000 * 60 * 60 * 24
 
 
 labelTasks : Time.Zone -> Time.Posix -> List Task -> LabeledTasks
@@ -372,14 +369,11 @@ labelTasks here now tasks =
                 )
                 incomplete
 
-        sod =
-            startOfDay here now
-
         reccomendations =
-            dueDateRecommendations here sod hasDue
+            dueDateRecommendations here now hasDue
 
-        notDone =
-            List.filter (.task >> isDoneToday here now >> not) reccomendations
+        ( doneToday_, notDone ) =
+            List.partition (.task >> isDoneToday here now) reccomendations
 
         isOverdue task =
             case Task.due task of
@@ -396,29 +390,36 @@ labelTasks here now tasks =
             endOfDay here now
 
         isDueToday { start } =
-            Time.posixToMillis start < Time.posixToMillis eod
+            Time.posixToMillis start <= Time.posixToMillis eod
 
         ( doToday, doAfterToday ) =
             List.partition isDueToday upcoming
 
         maxUrgency =
-            Maybe.map .urgency <| List.head doAfterToday
+            Maybe.map .urgency <| List.head reccomendations
 
         ( doSoon, doLater ) =
             List.partition (.urgency >> Just >> (==) maxUrgency) doAfterToday
 
-        rangeToPercentage { task, start, end } =
+        rangeToPercentage labeledTask =
             let
                 percentageDone =
-                    if Time.posixToMillis end <= Time.posixToMillis eod then
+                    if Time.posixToMillis labeledTask.end <= Time.posixToMillis eod then
                         1
 
                     else
-                        toFloat (Time.posixToMillis eod - Time.posixToMillis start) / toFloat (Time.posixToMillis end - Time.posixToMillis start)
+                        toFloat (Time.posixToMillis eod - Time.posixToMillis labeledTask.start) / toFloat (Time.posixToMillis labeledTask.end - Time.posixToMillis labeledTask.start)
             in
-            ( task, percentageDone )
+            ( labeledTask, percentageDone )
     in
-    { done = done, noDue = noDue, doSoon = doSoon, doLater = doLater, doToday = List.map rangeToPercentage doToday, overdue = List.map .task overdue }
+    { done = done
+    , noDue = noDue
+    , doSoon = doSoon
+    , doLater = doLater
+    , doToday = List.map rangeToPercentage doToday
+    , overdue = overdue
+    , doneToday = doneToday_
+    }
 
 
 startOfDay : Time.Zone -> Time.Posix -> Time.Posix
@@ -439,11 +440,16 @@ startOfDay zone time =
     Time.millisToPosix (Time.posixToMillis time - millisSinceStart)
 
 
+endOfYesterday : Time.Zone -> Time.Posix -> Time.Posix
+endOfYesterday zone time =
+    Time.millisToPosix <| Time.posixToMillis (startOfDay zone time) - 1000
+
+
 isDoneToday : Time.Zone -> Time.Posix -> Task -> Bool
 isDoneToday zone time t =
     case Task.doneOn t of
         Just doneOn ->
-            Time.posixToMillis doneOn > Time.posixToMillis (startOfDay zone time)
+            Time.posixToMillis doneOn >= Time.posixToMillis (startOfDay zone time)
 
         Nothing ->
             False
@@ -461,14 +467,15 @@ type Label
     | DoLater
     | NoDue
     | Done
+    | DoneToday
 
 
 taskLabelWithId : LabeledTasks -> Id Task -> Label
 taskLabelWithId taskLabels taskId =
-    if List.any (Task.id >> (==) taskId) taskLabels.overdue then
+    if List.any (.task >> Task.id >> (==) taskId) taskLabels.overdue then
         Overdue
 
-    else if List.any (Tuple.first >> Task.id >> (==) taskId) taskLabels.doToday then
+    else if List.any (Tuple.first >> .task >> Task.id >> (==) taskId) taskLabels.doToday then
         DoToday
 
     else if List.any (.task >> Task.id >> (==) taskId) taskLabels.doSoon then
@@ -499,10 +506,10 @@ folderLabelWithId taskLabels folderId fs =
                                 False
                    )
     in
-    if List.any taskHasParent taskLabels.overdue then
+    if List.any (.task >> taskHasParent) taskLabels.overdue then
         Overdue
 
-    else if List.any (Tuple.first >> taskHasParent) taskLabels.doToday then
+    else if List.any (Tuple.first >> .task >> taskHasParent) taskLabels.doToday then
         DoToday
 
     else if List.any (.task >> taskHasParent) taskLabels.doSoon then

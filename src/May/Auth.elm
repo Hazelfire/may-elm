@@ -290,7 +290,7 @@ getTokenTask body =
 
 exchangeAuthCodeBody : String -> String
 exchangeAuthCodeBody code =
-    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=https://may.hazelfire.net/&code=" ++ code
+    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=" ++ Urls.redirectUri ++ "&code=" ++ code
 
 
 authBase : String
@@ -300,12 +300,12 @@ authBase =
 
 clientId : String
 clientId =
-    "1qu0jlg90401pc5lf41jukbd15"
+    Urls.clientId
 
 
 refreshTokenBody : AuthTokens -> String
 refreshTokenBody (AuthTokens { refreshToken }) =
-    "grant_type=refresh_token&client_id=" ++ clientId ++ "&redirect_uri=https://may.hazelfire.net/&refresh_token=" ++ refreshToken
+    "grant_type=refresh_token&client_id=" ++ clientId ++ "&redirect_uri=" ++ Urls.redirectUri ++ "&refresh_token=" ++ refreshToken
 
 
 refreshTokens : (Result String AuthTokens -> a) -> AuthTokens -> Cmd a

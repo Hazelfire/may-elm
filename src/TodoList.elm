@@ -4,7 +4,6 @@ port module TodoList exposing
     , Msg(..)
     , SyncStatus(..)
     , TaskEditing(..)
-    , ViewId(..)
     , ViewType(..)
     , init
     , main
@@ -23,9 +22,9 @@ import Date
 import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
-import Html exposing (Attribute, Html, a, button, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, href, id, target, type_, value)
-import Html.Events exposing (keyCode, on, onBlur, onClick, onInput)
+import Html exposing (Attribute, Html, a, br, button, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, tabindex, target, type_, value)
+import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
@@ -56,7 +55,9 @@ type alias Model =
     , currentZone : Maybe Time.Zone
     , authState : Auth.AuthState
     , syncStatus : SyncStatus
+    , retryCommand : Maybe (Cmd Msg)
     , notice : Notice
+    , authCode : Maybe String
     }
 
 
@@ -79,13 +80,14 @@ type SyncStatus
 
 type ViewType
     = ViewTypeFolder FolderView
-    | ViewTypeStatistics
+    | ViewTypeStatistics (Maybe Statistics.LabeledTask)
 
 
 type alias FolderView =
     { id : Id Folder
     , editing : FolderEditing
-    , taskEdit : TaskView
+    , viewOld : Bool
+    , taskEdit : Maybe TaskView
     }
 
 
@@ -99,6 +101,7 @@ type FolderEditing
     = NotEditingFolder
     | EditingFolderName String
     | ConfirmingDeleteFolder
+    | MovingFolder (Id Folder)
 
 
 type TaskEditing
@@ -106,11 +109,12 @@ type TaskEditing
     | EditingTaskName String
     | EditingTaskDuration String
     | ConfirmingDeleteTask
+    | MovingTask
 
 
 newFolderView : Id Folder -> ViewType
 newFolderView id =
-    ViewTypeFolder { id = id, editing = NotEditingFolder }
+    ViewTypeFolder { id = id, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
 
 
 type Msg
@@ -123,13 +127,12 @@ type Msg
     | NewFolder (Id Folder) (Id Folder)
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
-    | StartEditingTaskName String
+    | StartEditingTaskName (Id Task) String
     | RequestSubscription
     | StartEditingFolderName String
-    | StartEditingTaskDuration
     | ChangeFolderName String
     | ChangeTaskName String
-    | ChangeTaskDuration String
+    | ChangeTaskDuration (Id Task) String
     | SetFolderName (Id Folder) String
     | SetTaskName (Id Task) String
     | SetTaskDuration (Id Task) Float
@@ -140,11 +143,11 @@ type Msg
     | SetTime Time.Posix
     | SetZone Time.Zone
     | ConfirmDeleteFolder
-    | CloseConfirmDeleteFolder
+    | ClearEditing
     | DeleteFolder (Id Folder)
-    | ConfirmDeleteTask
-    | CloseConfirmDeleteTask
+    | ConfirmDeleteTask (Id Task)
     | DeleteTask (Id Task)
+    | SetViewOld Bool
     | Logout
     | LogInConfirm
     | ConfirmDeleteAccount
@@ -154,6 +157,12 @@ type Msg
     | CancelAskForLogin
     | ShowHelpNotice
     | ViewUrgency
+    | SetUrgencyTaskHover (Maybe Statistics.LabeledTask)
+    | SelectMoveFolder (Id Folder)
+    | SelectMoveTask (Id Task)
+    | MoveTask (Id Task) (Id Folder)
+    | MoveFolder (Id Folder) (Id Folder)
+    | SendRetry
     | NoOp
 
 
@@ -207,17 +216,19 @@ init flagsValue =
             let
                 initModel =
                     { fs = flags.fs
-                    , viewing = ViewTypeFolder { id = FileSystem.getRootId flags.fs, editing = NotEditingFolder }
+                    , viewing = ViewTypeFolder { id = FileSystem.getRootId flags.fs, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
                     , currentTime = Nothing
                     , authState = Auth.Unauthenticated
                     , syncStatus = SyncOffline
                     , notice = NoNotice
                     , currentZone = Nothing
+                    , retryCommand = Nothing
+                    , authCode = Nothing
                     }
             in
             case ( flags.authCode, flags.authTokens ) of
                 ( Just authCode, _ ) ->
-                    ( { initModel | authState = Auth.Authenticating }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
+                    ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
 
                 ( _, Just tokens ) ->
                     if Auth.hasSubscription tokens then
@@ -237,12 +248,14 @@ init flagsValue =
                 ( model, command ) =
                     saveToLocalStorage
                         { fs = FileSystem.new (Folder.new rootId "My Tasks")
-                        , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder }
+                        , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
                         , currentTime = Nothing
                         , authState = Auth.Unauthenticated
                         , syncStatus = SyncOffline
                         , notice = NoNotice
                         , currentZone = Nothing
+                        , authCode = Nothing
+                        , retryCommand = Nothing
                         }
             in
             ( model, Cmd.batch (command :: requiredActions) )
@@ -275,7 +288,11 @@ update message model =
             ( model, Random.generate (NewTask parentId) Id.generate )
 
         NewTask parentId taskId ->
-            saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs }
+            let
+                ( newModel, command ) =
+                    saveToLocalStorageAndUpdate <| { model | fs = FileSystem.addTask parentId (Task.new taskId "New Task") model.fs, viewing = mapFolderView (\fv -> { fv | taskEdit = Just { id = taskId, editing = EditingTaskName "New Task" } }) model.viewing }
+            in
+            ( newModel, Cmd.batch [ command, setFocus "taskname" ] )
 
         SetZone zone ->
             pure <| { model | currentZone = Just zone }
@@ -302,8 +319,13 @@ update message model =
         StartEditingFolderName name ->
             withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName name)))) model
 
-        StartEditingTaskName name ->
-            withCommand (always (setFocus "taskname")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName name)))) model
+        StartEditingTaskName id name ->
+            case model.viewing of
+                ViewTypeFolder folderView ->
+                    ( { model | viewing = ViewTypeFolder { folderView | taskEdit = Just { id = id, editing = EditingTaskName name } } }, setFocus "taskname" )
+
+                _ ->
+                    pure model
 
         SetFolderName fid name ->
             let
@@ -319,14 +341,11 @@ update message model =
             in
             saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
 
-        StartEditingTaskDuration ->
-            withCommand (always (setFocus "taskduration")) <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskDuration "")))) model
-
         ChangeTaskName newName ->
             pure <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName newName)))) model
 
-        ChangeTaskDuration newDuration ->
-            pure <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskDuration newDuration)))) model
+        ChangeTaskDuration id newDuration ->
+            pure <| mapViewing (mapFolderView (\folderView -> { folderView | taskEdit = Just { id = id, editing = EditingTaskDuration newDuration } })) model
 
         ChangeFolderName newName ->
             pure <| mapViewing (mapFolderView (\x -> { x | editing = EditingFolderName newName })) model
@@ -352,17 +371,14 @@ update message model =
         SetTaskDoneOn tid doneOn ->
             saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDoneOn doneOn)) model
 
-        ConfirmDeleteTask ->
-            pure <| mapViewing (mapTaskView (mapTaskEditing (always ConfirmingDeleteTask))) model
+        ConfirmDeleteTask id ->
+            pure <| mapViewing (mapFolderView <| \folderView -> { folderView | taskEdit = Just { id = id, editing = ConfirmingDeleteTask } }) model
 
-        CloseConfirmDeleteTask ->
-            pure <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) model
+        ClearEditing ->
+            pure <| mapViewing (mapFolderView (\folderView -> { folderView | editing = NotEditingFolder, taskEdit = Nothing })) model
 
         ConfirmDeleteFolder ->
             pure <| mapViewing (mapFolderView (mapFolderEditing (always ConfirmingDeleteFolder))) model
-
-        CloseConfirmDeleteFolder ->
-            pure <| mapViewing (mapFolderView (mapFolderEditing (always NotEditingFolder))) model
 
         DeleteFolder fid ->
             let
@@ -397,7 +413,12 @@ update message model =
                     pure model
 
         GotAuthResponse (Err _) ->
-            pure <| { model | authState = Auth.AuthFailed }
+            case model.authCode of
+                Just code ->
+                    pure <| { model | authState = Auth.AuthFailed, retryCommand = Just <| Auth.exchangeAuthCode GotAuthResponse code }
+
+                Nothing ->
+                    pure <| { model | authState = Auth.AuthFailed }
 
         GotAuthResponse (Ok response) ->
             if Auth.hasSubscription response then
@@ -408,7 +429,11 @@ update message model =
                 ( newModel, Cmd.batch [ command, requestNodes response ] )
 
             else
-                saveToLocalStorage <| { model | authState = Auth.SubscriptionNeeded response, notice = AskForSubscription }
+                let
+                    ( newModel, command ) =
+                        saveToLocalStorage <| { model | authState = Auth.SubscriptionNeeded response, notice = AskForSubscription }
+                in
+                ( newModel, Cmd.batch [ command, checkSubscription response ] )
 
         RequestSubscription ->
             case Auth.stateAuthTokens model.authState of
@@ -422,12 +447,9 @@ update message model =
             ( model, openStripe sessionId )
 
         GotSubscriptionSessionId (Err _) ->
-            case Auth.stateAuthTokens model.authState of
-                Just tokens ->
-                    pure <| { model | authState = Auth.SubscriptionRequestFailed tokens }
-
-                Nothing ->
-                    pure model
+            withTokens model <|
+                \tokens ->
+                    pure <| { model | authState = Auth.SubscriptionRequestFailed tokens, retryCommand = Just <| requestSubscription tokens }
 
         GotSubscriptionCheck (Err _) ->
             withTokens model <|
@@ -445,7 +467,7 @@ update message model =
         GotSubscriptionCheck (Ok False) ->
             withTokens model <|
                 \tokens ->
-                    pure <| { model | authState = Auth.SubscriptionNeeded tokens }
+                    pure <| { model | authState = Auth.SubscriptionNeeded tokens, retryCommand = Just <| checkSubscription tokens }
 
         GotNodes (Ok fsUpdate) ->
             case Auth.stateAuthTokens model.authState of
@@ -482,10 +504,14 @@ update message model =
                     pure model
 
         GotNodes (Err _) ->
-            pure <| { model | syncStatus = RetreiveFailed }
+            withTokens model <|
+                \tokens ->
+                    pure <| { model | syncStatus = RetreiveFailed, retryCommand = Just <| requestNodes tokens }
 
         GotUpdateSuccess (Err _) ->
-            pure <| { model | syncStatus = UpdateFailed }
+            withTokens model <|
+                \tokens ->
+                    pure { model | syncStatus = UpdateFailed, retryCommand = Just <| sendSyncList tokens (FileSystem.syncList model.fs) }
 
         GotUpdateSuccess (Ok _) ->
             let
@@ -545,11 +571,45 @@ update message model =
 
         ViewUrgency ->
             case model.viewing of
-                ViewTypeStatistics ->
+                ViewTypeStatistics _ ->
                     pure <| { model | viewing = newFolderView (FileSystem.getRootId model.fs) }
 
                 _ ->
-                    pure <| { model | viewing = ViewTypeStatistics }
+                    pure <| { model | viewing = ViewTypeStatistics Nothing }
+
+        SetViewOld filter ->
+            pure <| mapViewing (mapFolderView <| \folderView -> { folderView | viewOld = filter }) model
+
+        SetUrgencyTaskHover task ->
+            pure <| { model | viewing = ViewTypeStatistics task }
+
+        SelectMoveFolder folderId ->
+            pure <| mapViewing (mapFolderView (mapFolderEditing (always (MovingFolder folderId)))) model
+
+        SelectMoveTask taskId ->
+            pure <| mapViewing (mapFolderView (\folderView -> { folderView | taskEdit = Just { id = taskId, editing = MovingTask } })) model
+
+        MoveTask taskId folderId ->
+            let
+                fsUpdate =
+                    mapFileSystem (FileSystem.moveTask taskId folderId) model
+            in
+            saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\folderView -> { folderView | taskEdit = Nothing })) fsUpdate
+
+        MoveFolder folderId parentId ->
+            let
+                fsUpdate =
+                    mapFileSystem (FileSystem.moveFolder folderId parentId) model
+            in
+            saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\folderView -> { folderView | editing = NotEditingFolder })) fsUpdate
+
+        SendRetry ->
+            case model.retryCommand of
+                Just command ->
+                    ( model, command )
+
+                Nothing ->
+                    pure model
 
         NoOp ->
             pure model
@@ -661,7 +721,7 @@ withCommand commandFunc model =
 
 addWeek : Time.Zone -> Time.Posix -> Time.Posix
 addWeek _ time =
-    Time.millisToPosix <| Time.posixToMillis (Statistics.startOfDay Time.utc time) + (1000 * 60 * 60 * 24 * 7)
+    Time.millisToPosix <| Time.posixToMillis (Statistics.endOfDay Time.utc time) + (1000 * 60 * 60 * 24 * 7)
 
 
 mapViewing : (ViewType -> ViewType) -> Model -> Model
@@ -694,6 +754,11 @@ mapFolderView func model =
             a
 
 
+mapTaskView : (TaskView -> TaskView) -> ViewType -> ViewType
+mapTaskView func =
+    mapFolderView <| \folderView -> { folderView | taskEdit = Maybe.map func folderView.taskEdit }
+
+
 view : Model -> Html Msg
 view model =
     case ( model.currentZone, model.currentTime ) of
@@ -704,8 +769,8 @@ view model =
                         ViewTypeFolder folderView ->
                             viewFolderDetails here now folderView model.fs
 
-                        ViewTypeStatistics ->
-                            viewStatisticsDetails here now model
+                        ViewTypeStatistics task ->
+                            viewStatisticsDetails here now model task
             in
             div []
                 [ viewHeader model
@@ -717,7 +782,7 @@ view model =
                                 [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
                                 , itemView
                                 ]
-                            , div [ class "four wide column" ] [ viewTodo model.currentZone model.currentTime (FileSystem.allTasks model.fs) ]
+                            , div [ class "four wide column" ] [ viewTodo model ]
                             ]
 
                     _ ->
@@ -768,8 +833,7 @@ viewNotice model =
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Are you sure you want an account?" ]
                     , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
-                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $10 (AUD) a month, for which I donate $5 to ", a [ href "https://effectivealtruism.org.au/", target "_blank" ] [ text "Effective Altruism Australia" ] ]
-                    , p [] [ text "If you want an account, go ahead and get one. Otherwise, you can go back to the free version." ]
+                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $10 (AUD) a month, if you made an account before midnight of the 9th of April, all $10 will be donated to ", a [ href "https://www.hki.org/", target "_blank" ] [ text "Helen Keller International" ], text " as part of my fundraiser. All $10 will be donated to Helen Keller International every month until you cancel your subscription." ]
                     , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
                     , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
                     , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
@@ -798,7 +862,7 @@ viewNotice model =
                     , p [] [ text "Any task that you complete today goes in the Done Today list." ]
                     , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
                     , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
-                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, for which I donate $5 to ", a [ href "https://effectivealtruism.org.au/", target "_blank" ] [ text "Effective Altruism Australia" ], text ". There is no such thing as a free account on May." ]
+                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, if you made your account before midnight of the 9th of September, all $10 will go to ", a [ href "https://www.hki.org/", target "_blank" ] [ text "Helen Keller International" ], text " until you cancel your subscription." ]
                     , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
                     , h5 [] [ text "Privacy and Terms of Service" ]
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
@@ -808,21 +872,94 @@ viewNotice model =
                 ]
 
 
-viewStatisticsDetails : Time.Zone -> Time.Posix -> Model -> Html Msg
-viewStatisticsDetails here now model =
+filterJust : List (Maybe a) -> List a
+filterJust list =
+    case list of
+        (Just x) :: rest ->
+            x :: filterJust rest
+
+        Nothing :: rest ->
+            filterJust rest
+
+        [] ->
+            []
+
+
+filterMaybe : (a -> Maybe b) -> List a -> List b
+filterMaybe pred list =
+    List.map pred list |> filterJust
+
+
+type alias UrgencyBarLabeledTask =
+    { task : Task
+    , start : Time.Posix
+    , end : Time.Posix
+    , urgency : Float
+    , label : Statistics.Label
+    , parent : Id Folder
+    }
+
+
+labelTaskToUrgencyBar : Statistics.LabeledTask -> Id Folder -> Statistics.Label -> UrgencyBarLabeledTask
+labelTaskToUrgencyBar { task, start, end, urgency } parent label =
+    { task = task
+    , start = start
+    , end = end
+    , urgency = urgency
+    , parent = parent
+    , label = label
+    }
+
+
+labeledTasksToUrgencyBars : FileSystem -> Statistics.LabeledTasks -> List UrgencyBarLabeledTask
+labeledTasksToUrgencyBars fs { overdue, doToday, doSoon, doLater, doneToday } =
+    let
+        tasksWithParents tasks =
+            tasks
+                |> List.map (\x -> ( x, FileSystem.taskParent (Task.id x.task) fs ))
+                |> filterMaybe
+                    (\( a, b ) -> Maybe.map (\x -> ( a, x )) b)
+
+        mapToUrgencyBars tasks label =
+            List.map (\( task, parent ) -> labelTaskToUrgencyBar task parent label) (tasksWithParents tasks)
+    in
+    List.concat
+        [ mapToUrgencyBars overdue Statistics.Overdue
+        , mapToUrgencyBars doneToday Statistics.DoneToday
+        , mapToUrgencyBars (List.map Tuple.first doToday) Statistics.DoToday
+        , mapToUrgencyBars doSoon Statistics.DoSoon
+        , mapToUrgencyBars doLater Statistics.DoLater
+        ]
+
+
+viewStatisticsDetails : Time.Zone -> Time.Posix -> Model -> Maybe Statistics.LabeledTask -> Html Msg
+viewStatisticsDetails here now model focusTask =
     let
         tasks =
-            Statistics.dueDateRecommendations here now (Statistics.doneTodayAndLater here now (FileSystem.allTasks model.fs))
+            Statistics.labelTasks here now (FileSystem.allTasks model.fs)
+
+        diagramTasks =
+            tasks.overdue ++ List.map Tuple.first tasks.doToday ++ tasks.doSoon ++ tasks.doLater
     in
     div [ class "notice urgencynotice" ]
         [ h3 [] [ text "Urgency" ]
         , p [] [ text "Urgency represents the amount of hours per day you need to do to complete your tasks by their due dates" ]
-        , if List.length tasks > 0 then
+        , if List.length diagramTasks > 0 then
             div []
                 [ p [] [ text "The following visualises how your urgency is calcualted" ]
                 , p [] [ text "Each task is a box, the height of the chart represents your urgency and the right edge of each box represents the due date that we recommend you complete the task by. Grey boxes represent tasks you have completed and the other colours represent the labels you are familiar with." ]
                 , p [] [ text "This was the best way that we could organise your tasks making urgency as low as possible. Completing tasks in the first block consist will decrease your urgency, however, doing a task in any later block would not mean you have to do any less work today." ]
-                , viewGroups here now tasks
+                , div [ class "urgencygraphcontainer" ]
+                    (filterJust
+                        [ Just <| viewGroups here (labeledTasksToUrgencyBars model.fs tasks)
+                        , focusTask
+                            |> Maybe.map
+                                (\t ->
+                                    div [ class "urgencylabel" ]
+                                        [ p [] [ text <| Task.name t.task ], p [] [ text "Urgency: ", text <| showHours t.urgency ] ]
+                                )
+                        ]
+                    )
                 ]
 
           else
@@ -830,14 +967,15 @@ viewStatisticsDetails here now model =
         ]
 
 
-viewGroups : Time.Zone -> Time.Posix -> List Statistics.LabeledTask -> Html Msg
-viewGroups here now tasks =
+viewGroups : Time.Zone -> List UrgencyBarLabeledTask -> Html Msg
+viewGroups here tasks =
     let
         firsttask =
             List.head tasks
 
         maxTime =
-            List.head (List.reverse tasks) |> Maybe.andThen (.task >> Task.due)
+            List.maximum (List.map (.task >> Task.due >> Maybe.map Time.posixToMillis >> Maybe.withDefault 0) tasks)
+                |> Maybe.map Time.millisToPosix
     in
     case ( firsttask, maxTime ) of
         ( Just ft, Just max ) ->
@@ -860,21 +998,8 @@ viewGroups here now tasks =
 
                 yscale =
                     Scale.linear ( height - 2 * padding, 0 ) ( 0, ft.urgency )
-
-                labelTask task =
-                    if Task.doneOn task.task /= Nothing then
-                        Statistics.Done
-
-                    else if Time.posixToMillis task.start < Time.posixToMillis (Statistics.endOfDay here now) then
-                        Statistics.DoToday
-
-                    else if task.urgency == ft.urgency then
-                        Statistics.DoSoon
-
-                    else
-                        Statistics.DoLater
             in
-            Svg.svg [ Svg.viewBox 0 0 width height ]
+            Svg.svg [ Svg.viewBox 0 0 width height, Svg.class [ "urgencygraph" ], Svg.onMouseLeave (SetUrgencyTaskHover Nothing) ]
                 [ Svg.g [ Svg.class [ "axis" ], Svg.transform [ Svg.Translate padding padding ] ]
                     [ Axis.left [ Axis.tickCount 10 ] yscale
                     ]
@@ -882,15 +1007,15 @@ viewGroups here now tasks =
                     [ Axis.bottom [ Axis.tickCount 10 ] xscale
                     ]
                 , Svg.g [ Svg.transform [ Svg.Translate padding padding ], Svg.class [ "urgencyboxes" ] ]
-                    (List.map (\x -> viewUrgencyTaskBar xscale yscale (labelTask x) x) tasks)
+                    (List.map (viewUrgencyTaskBar xscale yscale) tasks)
                 ]
 
         _ ->
             div [] []
 
 
-viewUrgencyTaskBar : Scale.ContinuousScale Time.Posix -> Scale.ContinuousScale Float -> Statistics.Label -> Statistics.LabeledTask -> Svg.Svg Msg
-viewUrgencyTaskBar xscale yscale label { urgency, start, task, end } =
+viewUrgencyTaskBar : Scale.ContinuousScale Time.Posix -> Scale.ContinuousScale Float -> UrgencyBarLabeledTask -> Svg.Svg Msg
+viewUrgencyTaskBar xscale yscale { label, parent, urgency, start, end, task } =
     let
         ( max, _ ) =
             Scale.range yscale
@@ -900,7 +1025,8 @@ viewUrgencyTaskBar xscale yscale label { urgency, start, task, end } =
         , SvgPx.y (Scale.convert yscale urgency)
         , SvgPx.width (Scale.convert xscale end - Scale.convert xscale start)
         , SvgPx.height (max - Scale.convert yscale urgency)
-        , Svg.onClick (SetView (ViewIdTask (Task.id task)))
+        , Svg.onClick (SetView parent)
+        , Svg.onMouseEnter (SetUrgencyTaskHover (Just { task = task, start = start, urgency = urgency, end = end }))
         , Svg.class
             [ case label of
                 Statistics.DoSoon ->
@@ -912,8 +1038,11 @@ viewUrgencyTaskBar xscale yscale label { urgency, start, task, end } =
                 Statistics.DoToday ->
                     "dotodaybox"
 
-                Statistics.Done ->
+                Statistics.DoneToday ->
                     "donebox"
+
+                Statistics.Overdue ->
+                    "overduebox"
 
                 _ ->
                     ""
@@ -975,29 +1104,37 @@ viewHeader model =
             ]
             [ text "Help" ]
         , ul [ class "right menu" ]
-            [ li [ class "item" ] [ text status ]
-            , li [ class "item" ]
-                [ div
-                    [ class <|
-                        "ui simple dropdown"
-                    ]
-                    [ text "Account"
-                    , viewIcon "dropdown"
-                    , div [ class "menu" ]
-                        (case model.authState of
-                            Auth.Authenticated _ ->
-                                [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
-                                , div [ class "item", onClick Logout ] [ text "Logout" ]
-                                ]
+            ((case model.retryCommand of
+                Just _ ->
+                    [ li [ class "item clickable", onClick SendRetry ] [ text "Retry" ] ]
 
-                            _ ->
-                                [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
-                                , a [ class "item", href Urls.loginUrl ] [ text "Login" ]
-                                ]
-                        )
-                    ]
-                ]
-            ]
+                Nothing ->
+                    []
+             )
+                ++ [ li [ class "item" ] [ text status ]
+                   , li [ class "item" ]
+                        [ div
+                            [ class <|
+                                "ui simple dropdown"
+                            ]
+                            [ text "Account"
+                            , viewIcon "dropdown"
+                            , div [ class "menu" ]
+                                (case model.authState of
+                                    Auth.Authenticated _ ->
+                                        [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                                        , div [ class "item", onClick Logout ] [ text "Logout" ]
+                                        ]
+
+                                    _ ->
+                                        [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
+                                        , a [ class "item", href Urls.loginUrl ] [ text "Login" ]
+                                        ]
+                                )
+                            ]
+                        ]
+                   ]
+            )
         ]
 
 
@@ -1046,73 +1183,77 @@ formatTime here time =
     String.fromInt (Time.toDay here time) ++ "/" ++ String.fromInt (monthToNumber <| Time.toMonth here time)
 
 
-viewTodo : Maybe Time.Zone -> Maybe Time.Posix -> List Task -> Html Msg
-viewTodo hereM nowM tasks =
-    case ( hereM, nowM ) of
+createTodoItems : FileSystem -> List a -> (a -> Task) -> (a -> String) -> List TodoItem
+createTodoItems fs taskSection taskFunc labelFunc =
+    filterJust
+        (List.map
+            (\task ->
+                Maybe.map
+                    (\parent ->
+                        { parent = parent
+                        , task = taskFunc task
+                        , label = labelFunc task
+                        }
+                    )
+                    (FileSystem.taskParent (Task.id (taskFunc task)) fs)
+            )
+            taskSection
+        )
+
+
+createTodoSection : FileSystem -> String -> String -> List a -> (a -> Task) -> (a -> String) -> Maybe (Html Msg)
+createTodoSection fs color name taskList taskFunc labelFunc =
+    case taskList of
+        [] ->
+            Nothing
+
+        _ ->
+            Just (viewTodoSection color name (createTodoItems fs taskList taskFunc labelFunc))
+
+
+viewTodo : Model -> Html Msg
+viewTodo model =
+    case ( model.currentZone, model.currentTime ) of
         ( Just here, Just now ) ->
             let
+                tasks =
+                    FileSystem.allTasks model.fs
+
                 labeledTasks =
                     Statistics.labelTasks here now tasks
 
                 addDurations =
-                    List.map (\x -> ( x, showHours (Task.duration x) ))
+                    Task.duration >> showHours
 
                 addPercentages =
-                    List.map (\( x, p ) -> ( x, showPercentage p ))
-
-                addNothing =
-                    List.map (\x -> ( x, "" ))
+                    Tuple.second >> showPercentage
 
                 addDueDates =
-                    List.map (\{ task, end } -> ( task, formatTime here end ))
-
-                sections =
-                    if List.length labeledTasks.overdue > 0 then
-                        [ viewTodoSection "red" "Overdue" (addNothing labeledTasks.overdue) ]
-
-                    else
-                        []
-
-                sectionsToday =
-                    if List.length labeledTasks.doToday > 0 then
-                        viewTodoSection "orange" "Do Today" (addPercentages labeledTasks.doToday) :: sections
-
-                    else
-                        sections
-
-                sectionsSoon =
-                    if List.length labeledTasks.doSoon > 0 then
-                        viewTodoSection "green" "Do Soon" (addDueDates labeledTasks.doSoon) :: sectionsToday
-
-                    else
-                        sectionsToday
-
-                sectionsDoLater =
-                    if List.length labeledTasks.doLater > 0 then
-                        viewTodoSection "purple" "Do Later" (addDueDates labeledTasks.doLater) :: sectionsSoon
-
-                    else
-                        sectionsSoon
-
-                sectionsNoInfo =
-                    if List.length labeledTasks.noDue > 0 then
-                        viewTodoSection "blue" "No Info" (addNothing labeledTasks.noDue) :: sectionsDoLater
-
-                    else
-                        sectionsDoLater
+                    \{ end } -> formatTime here end
 
                 doneToday =
                     Statistics.doneToday here now tasks
 
-                allSections =
-                    if List.length doneToday > 0 then
-                        viewTodoSection "black" "Done today" (addDurations doneToday) :: sectionsNoInfo
+                id x =
+                    x
 
-                    else
-                        sectionsNoInfo
+                fs =
+                    model.fs
+
+                sections =
+                    [ createTodoSection fs "red" "Overdue" labeledTasks.overdue .task (always "")
+                    , createTodoSection fs "orange" "Do Today" labeledTasks.doToday (Tuple.first >> .task) addPercentages
+                    , createTodoSection fs "green" "Do Soon" labeledTasks.doSoon .task addDueDates
+                    , createTodoSection fs "purple" "Do Later" labeledTasks.doLater .task addDueDates
+                    , createTodoSection fs "blue" "No Info" labeledTasks.noDue id (always "")
+                    , createTodoSection fs "black" "Done today" doneToday id addDurations
+                    ]
+
+                allSections =
+                    filterJust sections
             in
             div [ class "todo" ]
-                (List.reverse allSections)
+                allSections
 
         _ ->
             div [] [ text "loading" ]
@@ -1123,14 +1264,21 @@ showPercentage amount =
     String.fromInt (floor (amount * 100)) ++ "%"
 
 
-viewTodoSection : String -> String -> List ( Task, String ) -> Html Msg
+type alias TodoItem =
+    { task : Task
+    , label : String
+    , parent : Id Folder
+    }
+
+
+viewTodoSection : String -> String -> List TodoItem -> Html Msg
 viewTodoSection color title tasks =
     div []
         (h3 [ class <| "ui header todosectionheader " ++ color ] [ text title ]
             :: List.map
-                (\( task, label ) ->
+                (\{ task, label, parent } ->
                     div [ class "todoitem" ]
-                        [ a [ onClick (SetView (ViewIdTask (Task.id task))), class "clickable" ] [ text <| label ++ " " ++ Task.name task ]
+                        [ a [ onClick (SetView parent), class "clickable", tabindex 0 ] [ text <| label ++ " " ++ Task.name task ]
                         ]
                 )
                 tasks
@@ -1141,7 +1289,7 @@ showHours : Float -> String
 showHours float =
     let
         base =
-            round (float * 100)
+            floor (float * 100)
 
         beforeDecimal =
             base // 100
@@ -1176,7 +1324,7 @@ viewStatistics hereM nowM tasks =
 
 viewStatistic : msg -> String -> String -> Html msg
 viewStatistic msg label value =
-    div [ class "ui small statistic clickable", onClick msg ]
+    div [ class "ui small statistic clickable", onClick msg, tabindex 0 ]
         [ div [ class "value" ] [ text value ]
         , div [ class "label" ] [ text label ]
         ]
@@ -1187,19 +1335,87 @@ viewButton color name message =
     button [ class <| "ui button " ++ color, onClick message ] [ text name ]
 
 
+confirmDeleteTaskModal : Id Task -> Html Msg
+confirmDeleteTaskModal taskId =
+    div [ class "ui modal active" ]
+        [ div [ class "header" ] [ text "Confirm Delete" ]
+        , div [ class "content" ]
+            [ div [ class "description" ]
+                [ p [] [ text "Are you sure that you want to delete this task?" ] ]
+            ]
+        , div [ class "actions" ]
+            [ div [ class "ui black deny button", onClick ClearEditing ]
+                [ text "Cancel" ]
+            , button [ class "ui positive button", onClick (DeleteTask taskId) ] [ text "Delete" ]
+            ]
+        ]
+
+
+confirmDeleteFolderModal : Id Folder -> Html Msg
+confirmDeleteFolderModal folderId =
+    div [ class "ui modal active" ]
+        [ div [ class "header" ] [ text "Confirm Delete" ]
+        , div [ class "content" ]
+            [ div [ class "description" ]
+                [ p [] [ text "Are you sure that you want to delete this folder?" ] ]
+            ]
+        , div [ class "actions" ]
+            [ div [ class "ui black deny button", onClick ClearEditing ]
+                [ text "Cancel" ]
+            , button [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
+            ]
+        ]
+
+
+moveTaskModal : Id Task -> FileSystem -> Html Msg
+moveTaskModal taskId fs =
+    div [ class "ui modal active" ]
+        [ i [ class "icon red right floated close clickable", onClick ClearEditing ] []
+        , div [ class "header" ] [ text "Move Task" ]
+        , div [ class "content" ]
+            [ div [ class "ui list" ]
+                [ folderList (Folder.id >> MoveTask taskId) (Folder.new Id.rootId "My Tasks") Nothing fs ]
+            ]
+        ]
+
+
+moveFolderModal : Id Folder -> FileSystem -> Html Msg
+moveFolderModal folderId fs =
+    div [ class "ui modal active" ]
+        [ i [ class "icon red right floated close clickable", onClick ClearEditing ] []
+        , div [ class "header" ] [ text "Move Folder" ]
+        , div [ class "content" ]
+            [ div [ class "ui list" ]
+                [ folderList (Folder.id >> MoveFolder folderId) (Folder.new Id.rootId "My Tasks") (Just folderId) fs ]
+            ]
+        ]
+
+
+folderList : (Folder -> Msg) -> Folder -> Maybe (Id Folder) -> FileSystem -> Html Msg
+folderList cmd folder excluding fs =
+    let
+        children =
+            FileSystem.foldersInFolder (Folder.id folder) fs
+
+        childrenElements =
+            children
+                |> List.filter (\child -> Just (Folder.id child) /= excluding)
+                |> List.map (\child -> folderList cmd child excluding fs)
+    in
+    div [ class "item" ]
+        [ viewIcon "folder"
+        , div [ class "content" ]
+            [ div [ class "header clickable", onClick (cmd folder) ] [ text <| Folder.name folder ]
+            , div [ class "list" ] childrenElements
+            ]
+        ]
+
+
 viewFolderDetails : Time.Zone -> Time.Posix -> FolderView -> FileSystem -> Html Msg
 viewFolderDetails here time folderView fs =
     let
         folderId =
             folderView.id
-
-        confirmDelete =
-            case folderView.editing of
-                ConfirmingDeleteFolder ->
-                    True
-
-                _ ->
-                    False
 
         editingName =
             case folderView.editing of
@@ -1208,185 +1424,88 @@ viewFolderDetails here time folderView fs =
 
                 _ ->
                     False
+
+        isRoot =
+            folderId == Id.rootId
+
+        folderM =
+            case FileSystem.getFolder folderId fs of
+                Just folder ->
+                    Just folder
+
+                Nothing ->
+                    if isRoot then
+                        Just <| Folder.new folderId "My Tasks"
+
+                    else
+                        Nothing
     in
-    if folderId == Id.rootId then
-        div []
-            [ div [ class "ui header attached top" ]
-                [ text "My Tasks"
-                ]
-            , div [ class "ui segment attached" ]
-                [ h3 [ class "ui header clearfix" ]
-                    [ text "Folders"
-                    , viewButton "right floated primary" "Add" (CreateFolder folderId)
-                    ]
-                , viewFolderList here time folderId fs
-                ]
-            , div [ class "ui segment attached" ]
-                [ h3 [ class "ui header clearfix" ]
-                    [ text "Tasks"
-                    , viewButton "right floated primary" "Add" (CreateTask folderId)
-                    ]
-                , viewTaskList here time folderId fs
-                ]
-            ]
-
-    else
-        case FileSystem.getFolder folderId fs of
-            Just folder ->
-                let
-                    nameText =
-                        case folderView.editing of
-                            EditingFolderName name ->
-                                name
-
-                            _ ->
-                                Folder.name folder
-                in
-                div []
-                    ((if confirmDelete then
-                        [ div [ class "ui modal active" ]
-                            [ div [ class "header" ] [ text "Confirm Delete" ]
-                            , div [ class "content" ]
-                                [ div [ class "description" ]
-                                    [ p [] [ text "Are you sure that you want to delete this folder?" ] ]
-                                ]
-                            , div [ class "actions" ]
-                                [ div [ class "ui black deny button", onClick CloseConfirmDeleteFolder ]
-                                    [ text "Cancel" ]
-                                , button [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
-                                ]
-                            ]
-                        ]
-
-                      else
-                        []
-                     )
-                        ++ [ ul [ class "ui menu attached top" ]
-                                [ li [ class "item" ] [ viewBackButton (FileSystem.folderParent folderId fs) ]
-                                , li [ class "item header-name" ] [ editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId)) ]
-                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteFolder ] ]
-                                ]
-                           , div [ class "ui segment attached" ]
-                                [ h3 [ class "ui header clearfix" ]
-                                    [ text "Folders"
-                                    , viewButton "right floated primary" "Add" (CreateFolder folderId)
-                                    ]
-                                , viewFolderList here time folderId fs
-                                ]
-                           , div [ class "ui segment attached" ]
-                                [ h3 [ class "ui header clearfix" ]
-                                    [ text "Tasks"
-                                    , viewButton "right floated primary" "Add" (CreateTask folderId)
-                                    ]
-                                , viewTaskList here time folderId fs
-                                ]
-                           ]
-                    )
-
-            Nothing ->
-                div [ class "ui header attached top" ] [ text "Could not find folder" ]
-
-
-viewTaskDetails : Time.Zone -> Time.Posix -> TaskView -> FileSystem -> Html Msg
-viewTaskDetails here now taskView fs =
-    let
-        taskId =
-            taskView.id
-
-        confirmDelete =
-            case taskView.editing of
-                ConfirmingDeleteTask ->
-                    True
-
-                _ ->
-                    False
-
-        editingName =
-            case taskView.editing of
-                EditingTaskName _ ->
-                    True
-
-                _ ->
-                    False
-
-        editingDuration =
-            case taskView.editing of
-                EditingTaskDuration _ ->
-                    True
-
-                _ ->
-                    False
-    in
-    case FileSystem.getTask taskId fs of
-        Just task ->
+    case folderM of
+        Just folder ->
             let
                 nameText =
-                    case taskView.editing of
-                        EditingTaskName name ->
+                    case folderView.editing of
+                        EditingFolderName name ->
                             name
 
                         _ ->
-                            Task.name task
-
-                durationText =
-                    case taskView.editing of
-                        EditingTaskDuration duration ->
-                            duration
-
-                        _ ->
-                            String.fromFloat (Task.duration task)
+                            Folder.name folder
             in
             div []
-                ((if confirmDelete then
-                    [ div [ class "ui modal active" ]
-                        [ div [ class "header" ] [ text "Confirm Delete" ]
-                        , div [ class "content" ]
-                            [ div [ class "description" ]
-                                [ p [] [ text "Are you sure that you want to delete this task?" ] ]
-                            ]
-                        , div [ class "actions" ]
-                            [ div [ class "ui black deny button", onClick CloseConfirmDeleteTask ]
-                                [ text "Cancel" ]
-                            , div [ class "ui positive button", onClick (DeleteTask taskId) ] [ text "Delete" ]
-                            ]
-                        ]
-                    ]
+                ((case folderView.editing of
+                    ConfirmingDeleteFolder ->
+                        [ confirmDeleteFolderModal folderId ]
 
-                  else
-                    []
+                    MovingFolder childId ->
+                        [ moveFolderModal childId fs ]
+
+                    _ ->
+                        case folderView.taskEdit of
+                            Just { id, editing } ->
+                                case editing of
+                                    ConfirmingDeleteTask ->
+                                        [ confirmDeleteTaskModal id ]
+
+                                    MovingTask ->
+                                        [ moveTaskModal id fs ]
+
+                                    _ ->
+                                        []
+
+                            _ ->
+                                []
                  )
                     ++ [ ul [ class "ui menu attached top" ]
-                            [ li [ class "item" ] [ viewBackButton (FileSystem.taskParent taskId fs) ]
-                            , li [ class "item header-name" ] [ editableField editingName "taskname" nameText (StartEditingTaskName nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId)) ]
-                            , ul [ class "right menu" ]
-                                [ li [ class "item" ]
-                                    [ case Task.doneOn task of
-                                        Nothing ->
-                                            div [ class "ui read-only checkbox" ]
-                                                [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) (Just now)), checked False ] []
-                                                , label [] [ text "Complete" ]
-                                                ]
-
-                                        Just _ ->
-                                            div [ class "ui checked read-only checkbox" ]
-                                                [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) Nothing), checked True ] []
-                                                , label [] [ text "Complete" ]
-                                                ]
-                                    ]
-                                , li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteTask ]
+                            (if isRoot then
+                                [ li [ class "item header-name" ] [ text "My Tasks" ]
                                 ]
+
+                             else
+                                [ li [ class "item header-name" ] [ div [ class "breadcrumb-block" ] [ div [ class "ui breadcrumb" ] (viewBreadcrumbSections fs folderId) ], editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId)) ]
+                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteFolder ] ]
+                                ]
+                            )
+                       , div [ class "ui segment attached" ]
+                            [ h3 [ class "ui header clearfix" ]
+                                [ viewButton "right floated primary" "Add" (CreateFolder folderId)
+                                , text "Folders"
+                                ]
+                            , viewFolderList here time folderId fs
                             ]
                        , div [ class "ui segment attached" ]
-                            [ div [ class "durationtitle" ] [ text "Duration" ]
-                            , span [ class "durationvalue" ] [ editableField editingDuration "taskduration" durationText StartEditingTaskDuration ChangeTaskDuration (parseFloatMessage (SetTaskDuration taskId)) ]
-                            , span [ class "durationlabel" ] [ text " hours" ]
-                            , viewDueField here task
+                            [ h3 [ class "ui header clearfix" ]
+                                [ viewButton "right floated primary" "Add" (CreateTask folderId)
+                                , text "Tasks"
+                                , br [] []
+                                , div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked folderView.viewOld, onClick (SetViewOld (not folderView.viewOld)) ] [], label [] [ text "View old tasks" ] ]
+                                ]
+                            , viewTaskList here time folderId fs folderView
                             ]
                        ]
                 )
 
         Nothing ->
-            div [ class "ui header attached top" ] [ text "Could not find task" ]
+            div [ class "ui header attached top" ] [ text "Could not find folder" ]
 
 
 parseDate : String -> Maybe Time.Posix
@@ -1437,17 +1556,26 @@ editableField editing elementId name currentlyEditingMsg workingMsg setValue =
         div [ class "ui input editablefield" ] [ input [ id elementId, onEnter (setValue name), onBlur (setValue name), onInput workingMsg, value name ] [] ]
 
     else
-        span [ onClick currentlyEditingMsg, class "clickable" ] [ text name ]
+        span [ onClick currentlyEditingMsg, class "clickable", tabindex 0, onFocus currentlyEditingMsg ] [ text name ]
 
 
-viewBackButton : Maybe (Id Folder) -> Html Msg
-viewBackButton parentId =
-    case parentId of
-        Just pid ->
-            button [ class "ui button aligned left", onClick (SetView (ViewIdFolder pid)) ] [ text "Back" ]
+viewBreadcrumbSections : FileSystem -> Id Folder -> List (Html Msg)
+viewBreadcrumbSections fs folderId =
+    case FileSystem.folderParent folderId fs of
+        Just parentId ->
+            if parentId == Id.rootId then
+                [ a [ class "section", onClick (SetView parentId) ] [ text "My Tasks" ], div [ class "divider" ] [ text "/" ] ]
+
+            else
+                case FileSystem.getFolder parentId fs of
+                    Just folder ->
+                        viewBreadcrumbSections fs parentId ++ [ a [ class "section", onClick (SetView parentId) ] [ text (Folder.name folder) ], div [ class "divider" ] [ text "/" ] ]
+
+                    Nothing ->
+                        []
 
         Nothing ->
-            button [ class "ui button aligned left disabled" ] [ text "Back" ]
+            []
 
 
 viewFolderList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> Html Msg
@@ -1465,19 +1593,26 @@ viewFolderList here time folderId fs =
     viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
 
 
-viewTaskList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> Html Msg
-viewTaskList here time folderId fs =
+viewTaskList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> FolderView -> Html Msg
+viewTaskList here time folderId fs folderView =
     let
         childrenTasks =
             FileSystem.tasksInFolder folderId fs
+
+        filteredTasks =
+            if not folderView.viewOld then
+                Statistics.doneTodayAndLater here time childrenTasks
+
+            else
+                childrenTasks
 
         taskLabels =
             Statistics.labelTasks here time (FileSystem.allTasks fs)
 
         labeledTasks =
-            List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) childrenTasks
+            List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) filteredTasks
     in
-    viewCards (List.map (\( task, label ) -> viewTaskCard here time label task) labeledTasks)
+    viewCards (List.map (\( task, label ) -> viewTaskCard here time label task folderView.taskEdit) labeledTasks)
 
 
 viewCards : List (Html Msg) -> Html Msg
@@ -1511,45 +1646,77 @@ labelToColor label =
         Statistics.Done ->
             "black"
 
+        Statistics.DoneToday ->
+            "black"
+
 
 viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
-    a [ class "ui card", onClick (SetView (ViewIdFolder (Folder.id folder))) ]
-        [ div [ class "content" ] [ div [ class "header" ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ] ] ]
+    div [ class "ui card" ]
+        [ div [ class "content" ]
+            [ div [ class "right floated ui simple dropdown" ]
+                [ i [ class "dropdown icon" ] []
+                , div [ class "menu" ]
+                    [ div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
+                    ]
+                ]
+            , div [ class "header clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
+            ]
+        ]
 
 
-viewTaskCard : Time.Zone -> Time.Posix -> Statistics.Label -> Task -> Html Msg
-viewTaskCard zone now taskLabel task =
+viewTaskCard : Time.Zone -> Time.Posix -> Statistics.Label -> Task -> Maybe TaskView -> Html Msg
+viewTaskCard zone now taskLabel task taskViewM =
     let
         checkbox =
             case Task.doneOn task of
                 Nothing ->
-                    div [ class "ui read-only checkbox right floated" ]
+                    div [ class "ui read-only checkbox left floated" ]
                         [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) (Just now)), checked False ] []
                         , label [] [ text "" ]
                         ]
 
                 Just _ ->
-                    div [ class "ui checked read-only checkbox right floated" ]
+                    div [ class "ui checked read-only checkbox left floated" ]
                         [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) Nothing), checked True ] []
                         , label [] [ text "" ]
                         ]
 
-        nameText =
-            case taskView.editing of
-                EditingTaskName name ->
-                    name
+        ( nameText, editingName ) =
+            Maybe.withDefault ( Task.name task, False ) <|
+                case taskViewM of
+                    Just taskView ->
+                        case taskView.editing of
+                            EditingTaskName name ->
+                                if taskView.id == Task.id task then
+                                    Just ( name, True )
 
-                _ ->
-                    Task.name task
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
+
+                    _ ->
+                        Nothing
 
         durationText =
-            case taskView.editing of
-                EditingTaskDuration duration ->
-                    duration
+            Maybe.withDefault (String.fromFloat (Task.duration task)) <|
+                case taskViewM of
+                    Just taskView ->
+                        case taskView.editing of
+                            EditingTaskDuration duration ->
+                                if taskView.id == Task.id task then
+                                    Just duration
 
-                _ ->
-                    String.fromFloat (Task.duration task)
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
+
+                    _ ->
+                        Nothing
 
         taskId =
             Task.id task
@@ -1557,17 +1724,24 @@ viewTaskCard zone now taskLabel task =
     div [ class "ui card" ]
         [ div [ class "content" ]
             [ checkbox
+            , div [ class "right floated ui simple dropdown" ]
+                [ i [ class "dropdown icon" ] []
+                , div [ class "menu" ]
+                    [ div [ class "item", onClick (ConfirmDeleteTask taskId), tabindex 0 ] [ text "Delete" ]
+                    , div [ class "item", onClick (SelectMoveTask taskId) ] [ text "Move" ]
+                    ]
+                ]
             , div [ class "header" ]
                 [ viewIcon <| "tasks " ++ labelToColor taskLabel
-                , editableField editingName "foldername" nameText (StartEditingTaskName nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
-                ]
-            , div [ class "meta" ]
-                [ text "Duration: "
-                , input [ type_ "number" ] [ text (String.fromFloat (Task.duration task)) ]
+                , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
                 ]
             ]
         , div [ class "content" ]
-            [ editableField editingDuration "taskduration" durationText StartEditingTaskDuration ChangeTaskDuration (parseFloatMessage (SetTaskDuration taskId))
+            [ div [] [ text "Duration" ]
+            , div [ class "ui right labeled input" ]
+                [ input [ class "durationfield", onBlur (parseFloatMessage (SetTaskDuration taskId) durationText), onInput (ChangeTaskDuration taskId), value durationText ] []
+                , label [ class "ui basic label" ] [ text "hours" ]
+                ]
             ]
         , div [ class "content" ]
             [ viewDueField zone task ]

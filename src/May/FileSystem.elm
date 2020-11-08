@@ -19,6 +19,8 @@ module May.FileSystem exposing
     , getTask
     , mapOnFolder
     , mapOnTask
+    , moveFolder
+    , moveTask
     , needsSync
     , new
     , setSyncList
@@ -233,8 +235,8 @@ tasksInFolder taskId (FileSystem fs) =
         fs.nodes
 
 
-mapOnFolder : Id Folder -> (Folder -> Folder) -> FileSystem -> FileSystem
-mapOnFolder folderId mapFunc (FileSystem fs) =
+mapOnFolderNode : Id Folder -> (FolderInfo -> FolderInfo) -> FileSystem -> FileSystem
+mapOnFolderNode folderId mapFunc (FileSystem fs) =
     case fs.nodes of
         [] ->
             FileSystem fs
@@ -242,16 +244,16 @@ mapOnFolder folderId mapFunc (FileSystem fs) =
         x :: rest ->
             let
                 (FileSystem restFs) =
-                    mapOnFolder folderId mapFunc (FileSystem { fs | nodes = rest })
+                    mapOnFolderNode folderId mapFunc (FileSystem { fs | nodes = rest })
             in
             case x of
                 FolderNode info ->
                     if Folder.id info.folder == folderId then
                         let
                             newFolder =
-                                mapFunc info.folder
+                                mapFunc info
                         in
-                        FileSystem { restFs | nodes = FolderNode { info | folder = newFolder } :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateFolder info.parent newFolder) restFs.syncList }
+                        FileSystem { restFs | nodes = FolderNode newFolder :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateFolder newFolder.parent newFolder.folder) restFs.syncList }
 
                     else
                         FileSystem { restFs | nodes = FolderNode info :: restFs.nodes }
@@ -260,8 +262,23 @@ mapOnFolder folderId mapFunc (FileSystem fs) =
                     FileSystem { restFs | nodes = a :: restFs.nodes }
 
 
-mapOnTask : Id Task -> (Task -> Task) -> FileSystem -> FileSystem
-mapOnTask taskId mapFunc (FileSystem fs) =
+mapOnFolder : Id Folder -> (Folder -> Folder) -> FileSystem -> FileSystem
+mapOnFolder folderId mapFunc fs =
+    mapOnFolderNode folderId (\info -> { info | folder = mapFunc info.folder }) fs
+
+
+moveFolder : Id Folder -> Id Folder -> FileSystem -> FileSystem
+moveFolder folderId parentId fs =
+    mapOnFolderNode folderId (\info -> { info | parent = parentId }) fs
+
+
+moveTask : Id Task -> Id Folder -> FileSystem -> FileSystem
+moveTask taskId folderId fs =
+    mapOnTaskNode taskId (\info -> { info | parent = folderId }) fs
+
+
+mapOnTaskNode : Id Task -> (TaskInfo -> TaskInfo) -> FileSystem -> FileSystem
+mapOnTaskNode taskId mapFunc (FileSystem fs) =
     case fs.nodes of
         [] ->
             FileSystem fs
@@ -269,22 +286,27 @@ mapOnTask taskId mapFunc (FileSystem fs) =
         x :: rest ->
             let
                 (FileSystem restFs) =
-                    mapOnTask taskId mapFunc (FileSystem { fs | nodes = rest })
+                    mapOnTaskNode taskId mapFunc (FileSystem { fs | nodes = rest })
             in
             case x of
                 TaskNode info ->
                     if Task.id info.task == taskId then
                         let
-                            newTask =
-                                mapFunc info.task
+                            newTaskNode =
+                                mapFunc info
                         in
-                        FileSystem { restFs | nodes = TaskNode { info | task = newTask } :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateTask info.parent newTask) restFs.syncList }
+                        FileSystem { restFs | nodes = TaskNode newTaskNode :: restFs.nodes, syncList = SyncList.addNode (SyncList.SyncUpdateTask newTaskNode.parent newTaskNode.task) restFs.syncList }
 
                     else
                         FileSystem { restFs | nodes = TaskNode info :: restFs.nodes }
 
                 a ->
                     FileSystem { restFs | nodes = a :: restFs.nodes }
+
+
+mapOnTask : Id Task -> (Task -> Task) -> FileSystem -> FileSystem
+mapOnTask taskId mapFunc fs =
+    mapOnTaskNode taskId (\info -> { info | task = mapFunc info.task }) fs
 
 
 allTaskDetails : FileSystem -> List TaskInfo
