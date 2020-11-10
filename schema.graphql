@@ -1,6 +1,7 @@
 union Node = Task | Folder
 
 scalar PosixTime 
+
 type Task {
   id : ID!
   name : String!

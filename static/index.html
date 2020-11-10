@@ -45,6 +45,13 @@ else {
   var storedData = localStorage.getItem('may-model');
   var storedData = storedData ? JSON.parse(storedData) : {};
   let code = localStorage.getItem('may-auth-code');
+  var tzo = -new Date().getTimezoneOffset(),
+        dif = tzo >= 0 ? '+' : '-',
+        pad = function(num) {
+            var norm = Math.floor(Math.abs(num));
+            return (norm < 10 ? '0' : '') + norm;
+        };
+  storedData.offset = dif + pad(tzo / 60) + pad(tzo % 60);
   if(code){
     // Hey! We just came back from an authentication request. Let's pass the code
     // along with the model and remove the code from local storage (we don't need it anymore)

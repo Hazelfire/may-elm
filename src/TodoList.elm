@@ -30,6 +30,7 @@ import Json.Decode as D
 import Json.Encode as E
 import May.Auth as Auth
 import May.FileSystem as FileSystem exposing (FileSystem)
+import May.Flags as Flags
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
 import May.Statistics as Statistics
@@ -58,6 +59,7 @@ type alias Model =
     , retryCommand : Maybe (Cmd Msg)
     , notice : Notice
     , authCode : Maybe String
+    , offset : String
     }
 
 
@@ -176,29 +178,20 @@ main =
         }
 
 
-type alias Flags =
-    { authCode : Maybe String
-    , authTokens : Maybe Auth.AuthTokens
+type alias LocalStorageSave =
+    { authTokens : Maybe Auth.AuthTokens
     , fs : FileSystem
     }
 
 
-flagDecoder : D.Decoder Flags
-flagDecoder =
-    D.map3 Flags
-        (D.maybe (D.field "code" D.string))
-        (D.maybe (D.field "tokens" Auth.tokensDecoder))
-        (D.field "fs" FileSystem.decode)
-
-
-encodeFlags : Flags -> E.Value
-encodeFlags flags =
-    case flags.authTokens of
+encodeLocalStorageSave : LocalStorageSave -> E.Value
+encodeLocalStorageSave save =
+    case save.authTokens of
         Just tokens ->
-            E.object [ ( "tokens", Auth.encodeTokens tokens ), ( "fs", FileSystem.encode flags.fs ) ]
+            E.object [ ( "tokens", Auth.encodeTokens tokens ), ( "fs", FileSystem.encode save.fs ), ( "version", E.string "1" ) ]
 
         Nothing ->
-            E.object [ ( "fs", FileSystem.encode flags.fs ) ]
+            E.object [ ( "fs", FileSystem.encode save.fs ), ( "version", E.string "1" ) ]
 
 
 {-| Initialises from storage modal
@@ -211,34 +204,58 @@ init flagsValue =
             , Time.here |> Task.perform SetZone
             ]
     in
-    case D.decodeValue flagDecoder flagsValue of
+    case D.decodeValue Flags.decode flagsValue of
         Ok flags ->
-            let
-                initModel =
-                    { fs = flags.fs
-                    , viewing = ViewTypeFolder { id = FileSystem.getRootId flags.fs, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
-                    , currentTime = Nothing
-                    , authState = Auth.Unauthenticated
-                    , syncStatus = SyncOffline
-                    , notice = NoNotice
-                    , currentZone = Nothing
-                    , retryCommand = Nothing
-                    , authCode = Nothing
-                    }
-            in
-            case ( flags.authCode, flags.authTokens ) of
-                ( Just authCode, _ ) ->
-                    ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
+            case flags.fs of
+                Just fs ->
+                    let
+                        initModel =
+                            { fs = fs
+                            , viewing = ViewTypeFolder { id = FileSystem.getRootId fs, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
+                            , currentTime = Nothing
+                            , authState = Auth.Unauthenticated
+                            , syncStatus = SyncOffline
+                            , notice = NoNotice
+                            , currentZone = Nothing
+                            , retryCommand = Nothing
+                            , authCode = Nothing
+                            , offset = flags.offset
+                            }
+                    in
+                    case ( flags.authCode, flags.authTokens ) of
+                        ( Just authCode, _ ) ->
+                            ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
 
-                ( _, Just tokens ) ->
-                    if Auth.hasSubscription tokens then
-                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
+                        ( _, Just tokens ) ->
+                            if Auth.hasSubscription tokens then
+                                ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
 
-                    else
-                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
+                            else
+                                ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
 
-                _ ->
-                    ( initModel, Cmd.batch requiredActions )
+                        _ ->
+                            ( initModel, Cmd.batch requiredActions )
+
+                Nothing ->
+                    let
+                        rootId =
+                            Id.rootId
+
+                        ( model, command ) =
+                            saveToLocalStorage
+                                { fs = FileSystem.new (Folder.new rootId "My Tasks")
+                                , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
+                                , currentTime = Nothing
+                                , authState = Auth.Unauthenticated
+                                , syncStatus = SyncOffline
+                                , notice = NoNotice
+                                , currentZone = Nothing
+                                , authCode = Nothing
+                                , retryCommand = Nothing
+                                , offset = flags.offset
+                                }
+                    in
+                    ( model, Cmd.batch (command :: requiredActions) )
 
         Err _ ->
             let
@@ -256,6 +273,7 @@ init flagsValue =
                         , currentZone = Nothing
                         , authCode = Nothing
                         , retryCommand = Nothing
+                        , offset = ""
                         }
             in
             ( model, Cmd.batch (command :: requiredActions) )
@@ -674,7 +692,7 @@ requestSubscriptionSelectionSet =
 
 saveToLocalStorage : Model -> ( Model, Cmd msg )
 saveToLocalStorage =
-    withCommand (\model -> setLocalStorage (encodeFlags (Flags Nothing (Auth.stateAuthTokens model.authState) model.fs)))
+    withCommand (\model -> setLocalStorage (encodeLocalStorageSave (LocalStorageSave (Auth.stateAuthTokens model.authState) model.fs)))
 
 
 saveToLocalStorageAndUpdate : Model -> ( Model, Cmd Msg )
@@ -767,7 +785,7 @@ view model =
                 itemView =
                     case model.viewing of
                         ViewTypeFolder folderView ->
-                            viewFolderDetails here now folderView model.fs
+                            viewFolderDetails model.offset here now folderView model.fs
 
                         ViewTypeStatistics task ->
                             viewStatisticsDetails here now model task
@@ -833,7 +851,7 @@ viewNotice model =
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Are you sure you want an account?" ]
                     , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
-                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $10 (AUD) a month, if you made an account before midnight of the 9th of April, all $10 will be donated to ", a [ href "https://www.hki.org/", target "_blank" ] [ text "Helen Keller International" ], text " as part of my fundraiser. All $10 will be donated to Helen Keller International every month until you cancel your subscription." ]
+                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $3 (AUD) a month." ]
                     , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
                     , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
                     , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
@@ -862,7 +880,7 @@ viewNotice model =
                     , p [] [ text "Any task that you complete today goes in the Done Today list." ]
                     , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
                     , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
-                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $10 AUD, if you made your account before midnight of the 9th of September, all $10 will go to ", a [ href "https://www.hki.org/", target "_blank" ] [ text "Helen Keller International" ], text " until you cancel your subscription." ]
+                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $3 AUD." ]
                     , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
                     , h5 [] [ text "Privacy and Terms of Service" ]
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
@@ -1411,8 +1429,8 @@ folderList cmd folder excluding fs =
         ]
 
 
-viewFolderDetails : Time.Zone -> Time.Posix -> FolderView -> FileSystem -> Html Msg
-viewFolderDetails here time folderView fs =
+viewFolderDetails : String -> Time.Zone -> Time.Posix -> FolderView -> FileSystem -> Html Msg
+viewFolderDetails offset here time folderView fs =
     let
         folderId =
             folderView.id
@@ -1486,6 +1504,8 @@ viewFolderDetails here time folderView fs =
                                 ]
                             )
                        , div [ class "ui segment attached" ]
+                            []
+                       , div [ class "ui segment attached" ]
                             [ h3 [ class "ui header clearfix" ]
                                 [ viewButton "right floated primary" "Add" (CreateFolder folderId)
                                 , text "Folders"
@@ -1497,9 +1517,9 @@ viewFolderDetails here time folderView fs =
                                 [ viewButton "right floated primary" "Add" (CreateTask folderId)
                                 , text "Tasks"
                                 , br [] []
-                                , div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked folderView.viewOld, onClick (SetViewOld (not folderView.viewOld)) ] [], label [] [ text "View old tasks" ] ]
+                                , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
                                 ]
-                            , viewTaskList here time folderId fs folderView
+                            , viewTaskList offset here time folderId fs folderView
                             ]
                        ]
                 )
@@ -1508,11 +1528,17 @@ viewFolderDetails here time folderView fs =
             div [ class "ui header attached top" ] [ text "Could not find folder" ]
 
 
-parseDate : String -> Maybe Time.Posix
-parseDate date =
+viewCheckbox : String -> Bool -> a -> String -> Html a
+viewCheckbox labelText state msg className =
+    div [ class <| "ui read-only checkbox " ++ className ] [ input [ type_ "checkbox", checked state, onClick msg ] [], label [] [ text labelText ] ]
+
+
+parseDate : String -> String -> Maybe Time.Posix
+parseDate offset date =
     Iso8601.toTime
         (date
-            ++ "T23:59:59+10:00"
+            ++ "T23:59:59"
+            ++ offset
         )
         |> Result.toMaybe
 
@@ -1593,8 +1619,8 @@ viewFolderList here time folderId fs =
     viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
 
 
-viewTaskList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> FolderView -> Html Msg
-viewTaskList here time folderId fs folderView =
+viewTaskList : String -> Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> FolderView -> Html Msg
+viewTaskList offset here time folderId fs folderView =
     let
         childrenTasks =
             FileSystem.tasksInFolder folderId fs
@@ -1612,7 +1638,7 @@ viewTaskList here time folderId fs folderView =
         labeledTasks =
             List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) filteredTasks
     in
-    viewCards (List.map (\( task, label ) -> viewTaskCard here time label task folderView.taskEdit) labeledTasks)
+    viewCards (List.map (\( task, label ) -> viewTaskCard offset here time label task folderView.taskEdit) labeledTasks)
 
 
 viewCards : List (Html Msg) -> Html Msg
@@ -1665,22 +1691,16 @@ viewFolderCard label folder =
         ]
 
 
-viewTaskCard : Time.Zone -> Time.Posix -> Statistics.Label -> Task -> Maybe TaskView -> Html Msg
-viewTaskCard zone now taskLabel task taskViewM =
+viewTaskCard : String -> Time.Zone -> Time.Posix -> Statistics.Label -> Task -> Maybe TaskView -> Html Msg
+viewTaskCard offset zone now taskLabel task taskViewM =
     let
         checkbox =
             case Task.doneOn task of
                 Nothing ->
-                    div [ class "ui read-only checkbox left floated" ]
-                        [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) (Just now)), checked False ] []
-                        , label [] [ text "" ]
-                        ]
+                    viewCheckbox "" False (SetTaskDoneOn (Task.id task) (Just now)) "ui read-only checkbox left floated"
 
                 Just _ ->
-                    div [ class "ui checked read-only checkbox left floated" ]
-                        [ input [ type_ "checkbox", onClick (SetTaskDoneOn (Task.id task) Nothing), checked True ] []
-                        , label [] [ text "" ]
-                        ]
+                    viewCheckbox "" True (SetTaskDoneOn (Task.id task) Nothing) "ui read-only checkbox left floated"
 
         ( nameText, editingName ) =
             Maybe.withDefault ( Task.name task, False ) <|
@@ -1744,25 +1764,22 @@ viewTaskCard zone now taskLabel task taskViewM =
                 ]
             ]
         , div [ class "content" ]
-            [ viewDueField zone task ]
+            [ viewDueField offset zone task ]
         ]
 
 
-viewDueField : Time.Zone -> Task -> Html Msg
-viewDueField zone task =
+viewDueField : String -> Time.Zone -> Task -> Html Msg
+viewDueField offset zone task =
     case Task.due task of
         Just dueDate ->
             div []
-                [ div [ class "ui checkbox" ] [ input [ type_ "checkbox", checked True, onClick (SetTaskDue (Task.id task) Nothing) ] [], label [] [ text "Remove Due Date" ] ]
+                [ viewCheckbox "Remove Due Date" True (SetTaskDue (Task.id task) Nothing) ""
                 , div [ class "ui input" ]
-                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
+                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
                     ]
                 ]
 
         Nothing ->
             div []
-                [ div [ class "ui checkbox" ]
-                    [ input [ type_ "checkbox", checked False, onClick (SetTaskDueNow <| Task.id task) ] []
-                    , label [] [ text "Include Due Date" ]
-                    ]
+                [ viewCheckbox "Include Due Date" False (SetTaskDueNow <| Task.id task) ""
                 ]

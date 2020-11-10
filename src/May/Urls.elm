@@ -42,7 +42,7 @@ devUrls =
 
 usingUrls : Urls
 usingUrls =
-    prodUrls
+    stageUrls
 
 
 authBase : String
