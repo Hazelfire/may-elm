@@ -6,6 +6,7 @@ import Graphql.SelectionSet as Graphql
 import Json.Decode as D
 import Json.Encode as E
 import Random
+import Uuid.Barebones
 
 
 type Id a
@@ -16,10 +17,10 @@ type Id a
 -}
 generateId : Random.Generator String
 generateId =
-    Random.map String.fromList (Random.list 100 (Random.map Char.fromCode (Random.int 0 127)))
+    Uuid.Barebones.uuidStringGenerator
 
 
-{-| I am only using this coz code gen. Please don't use it often
+{-| I am only using this for the code generation in GraphQL. Please don't use it often
 -}
 magic : Id a -> Id b
 magic (Id a) =
