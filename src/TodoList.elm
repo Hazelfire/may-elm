@@ -103,7 +103,7 @@ type alias TaskView =
 type FolderEditing
     = NotEditingFolder
     | EditingFolderName String
-    | ConfirmingDeleteFolder
+    | ConfirmingDeleteFolder (Id Folder)
     | MovingFolder (Id Folder)
 
 
@@ -145,7 +145,7 @@ type Msg
     | SetView (Id Folder)
     | SetTime Time.Posix
     | SetZone Time.Zone
-    | ConfirmDeleteFolder
+    | ConfirmDeleteFolder (Id Folder)
     | ClearEditing
     | DeleteFolder (Id Folder)
     | ConfirmDeleteTask (Id Task)
@@ -385,8 +385,8 @@ update message model =
         ClearEditing ->
             pure <| mapViewing (mapFolderView (\folderView -> { folderView | editing = NotEditingFolder, taskEdit = Nothing })) model
 
-        ConfirmDeleteFolder ->
-            pure <| mapViewing (mapFolderView (mapFolderEditing (always ConfirmingDeleteFolder))) model
+        ConfirmDeleteFolder fid ->
+            pure <| mapViewing (mapFolderView (mapFolderEditing (always (ConfirmingDeleteFolder fid)))) model
 
         DeleteFolder fid ->
             let
@@ -1476,8 +1476,8 @@ viewFolderDetails offset here time folderView fs =
             in
             div []
                 ((case folderView.editing of
-                    ConfirmingDeleteFolder ->
-                        [ confirmDeleteFolderModal folderId ]
+                    ConfirmingDeleteFolder fid ->
+                        [ confirmDeleteFolderModal fid ]
 
                     MovingFolder childId ->
                         [ moveFolderModal childId fs ]
@@ -1505,7 +1505,7 @@ viewFolderDetails offset here time folderView fs =
 
                              else
                                 [ li [ class "item header-name" ] [ div [ class "breadcrumb-block" ] [ div [ class "ui breadcrumb" ] (viewBreadcrumbSections fs folderId) ], editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId)) ]
-                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" ConfirmDeleteFolder ] ]
+                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" (ConfirmDeleteFolder folderId) ] ]
                                 ]
                             )
                        , div [ class "ui segment attached" ]
@@ -1688,7 +1688,8 @@ viewFolderCard label folder =
             [ div [ class "right floated ui simple dropdown" ]
                 [ i [ class "dropdown icon" ] []
                 , div [ class "menu" ]
-                    [ div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
+                    [ div [ class "item", onClick (ConfirmDeleteFolder (Folder.id folder)) ] [ text "Delete" ]
+                    , div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
                     ]
                 ]
             , div [ class "header clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
