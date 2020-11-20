@@ -69,6 +69,7 @@ type Notice
     | AskConfirmDeleteAccount
     | AskForLogin
     | ShowHelp
+    | LocalStorageErrorNotice
 
 
 type SyncStatus
@@ -165,6 +166,7 @@ type Msg
     | MoveTask (Id Task) (Id Folder)
     | MoveFolder (Id Folder) (Id Folder)
     | SendRetry
+    | DeleteData
     | NoOp
 
 
@@ -238,45 +240,33 @@ init flagsValue =
 
                 Nothing ->
                     let
-                        rootId =
-                            Id.rootId
-
                         ( model, command ) =
                             saveToLocalStorage
-                                { fs = FileSystem.new (Folder.new rootId "My Tasks")
-                                , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
-                                , currentTime = Nothing
-                                , authState = Auth.Unauthenticated
-                                , syncStatus = SyncOffline
-                                , notice = NoNotice
-                                , currentZone = Nothing
-                                , authCode = Nothing
-                                , retryCommand = Nothing
-                                , offset = flags.offset
-                                }
+                                { emptyModel | offset = flags.offset }
                     in
                     ( model, Cmd.batch (command :: requiredActions) )
 
         Err _ ->
             let
-                rootId =
-                    Id.rootId
-
-                ( model, command ) =
-                    saveToLocalStorage
-                        { fs = FileSystem.new (Folder.new rootId "My Tasks")
-                        , viewing = ViewTypeFolder { id = rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
-                        , currentTime = Nothing
-                        , authState = Auth.Unauthenticated
-                        , syncStatus = SyncOffline
-                        , notice = NoNotice
-                        , currentZone = Nothing
-                        , authCode = Nothing
-                        , retryCommand = Nothing
-                        , offset = ""
-                        }
+                model =
+                    { emptyModel | notice = LocalStorageErrorNotice }
             in
-            ( model, Cmd.batch (command :: requiredActions) )
+            ( model, Cmd.batch requiredActions )
+
+
+emptyModel : Model
+emptyModel =
+    { fs = FileSystem.new (Folder.new Id.rootId "My Tasks")
+    , viewing = ViewTypeFolder { id = Id.rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
+    , currentTime = Nothing
+    , authState = Auth.Unauthenticated
+    , syncStatus = SyncOffline
+    , notice = NoNotice
+    , currentZone = Nothing
+    , authCode = Nothing
+    , retryCommand = Nothing
+    , offset = ""
+    }
 
 
 pure : a -> ( a, Cmd msg )
@@ -629,6 +619,9 @@ update message model =
                 Nothing ->
                     pure model
 
+        DeleteData ->
+            saveToLocalStorage emptyModel
+
         NoOp ->
             pure model
 
@@ -886,6 +879,18 @@ viewNotice model =
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
                     , h5 [] [ text "Contact" ]
                     , p [] [ text "If you have any questions, feature requests or just want to say hi, you can contact Sam Nolan at ", a [ href "mailto:sam@hazelfire.net" ] [ text "sam@hazelfire.net" ] ]
+                    ]
+                ]
+
+        LocalStorageErrorNotice ->
+            div [ class "help notice" ]
+                [ div
+                    [ class "noticecontent" ]
+                    [ h3 [] [ text "Failed to read local data." ]
+                    , p [] [ text "Oh no! I couldn't read the saved tasks and data on your computer" ]
+                    , p [] [ text "If you're not a developer, the best you can do is contact ", a [ href "mailto:sam@hazelfire.net" ] [ text "sam@hazelfire.net" ], text " and he can get your data back." ]
+                    , p [] [ text "If it doesn't bother you too much. You can also erase all data on your current system" ]
+                    , a [ href "/", class "ui red button", onClick DeleteData ] [ text "Delete all data" ]
                     ]
                 ]
 

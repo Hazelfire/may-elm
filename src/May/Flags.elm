@@ -41,5 +41,5 @@ decodeV1 =
     D.map4 Flags
         (D.maybe (D.field "code" D.string))
         (D.maybe (D.field "tokens" Auth.tokensDecoder))
-        (D.maybe (D.field "fs" FileSystem.decode))
+        (D.field "fs" (D.nullable FileSystem.decode))
         (D.field "offset" D.string)
