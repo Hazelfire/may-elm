@@ -167,6 +167,7 @@ type Msg
     | MoveFolder (Id Folder) (Id Folder)
     | SendRetry
     | DeleteData
+    | ShareFolder (Id Folder) Bool
     | NoOp
 
 
@@ -621,6 +622,20 @@ update message model =
 
         DeleteData ->
             saveToLocalStorage emptyModel
+
+        ShareFolder fid shareState ->
+            let
+                shareWith =
+                    if shareState then
+                        Just []
+
+                    else
+                        Nothing
+
+                fsChange =
+                    mapFileSystem (FileSystem.mapOnFolder fid (Folder.shareWith shareWith)) model
+            in
+            saveToLocalStorageAndUpdate fsChange
 
         NoOp ->
             pure model
@@ -1360,7 +1375,7 @@ viewButton color name message =
 
 confirmDeleteTaskModal : Id Task -> Html Msg
 confirmDeleteTaskModal taskId =
-    div [ class "ui modal active" ]
+    div [ class "ui active modal" ]
         [ div [ class "header" ] [ text "Confirm Delete" ]
         , div [ class "content" ]
             [ div [ class "description" ]
@@ -1376,7 +1391,7 @@ confirmDeleteTaskModal taskId =
 
 confirmDeleteFolderModal : Id Folder -> Html Msg
 confirmDeleteFolderModal folderId =
-    div [ class "ui modal active" ]
+    div [ class "ui active modal" ]
         [ div [ class "header" ] [ text "Confirm Delete" ]
         , div [ class "content" ]
             [ div [ class "description" ]
@@ -1509,7 +1524,7 @@ viewFolderDetails offset here time folderView fs =
                                 ]
                             )
                        , div [ class "ui segment attached" ]
-                            []
+                            [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
                        , div [ class "ui segment attached" ]
                             [ h3 [ class "ui header clearfix" ]
                                 [ viewButton "right floated primary" "Add" (CreateFolder folderId)

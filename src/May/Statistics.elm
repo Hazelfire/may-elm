@@ -369,6 +369,9 @@ labelTasks here now tasks =
                 )
                 incomplete
 
+        noDueNotDone =
+            List.filter (Task.doneOn >> (==) Nothing) noDue
+
         reccomendations =
             dueDateRecommendations here now hasDue
 
@@ -413,7 +416,7 @@ labelTasks here now tasks =
             ( labeledTask, percentageDone )
     in
     { done = done
-    , noDue = noDue
+    , noDue = noDueNotDone
     , doSoon = doSoon
     , doLater = doLater
     , doToday = List.map rangeToPercentage doToday

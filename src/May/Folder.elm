@@ -1,4 +1,4 @@
-module May.Folder exposing (Folder, decode, encode, id, name, new, rename, share, shareKey)
+module May.Folder exposing (Folder, decode, encode, id, isSharing, name, new, rename, shareWith)
 
 import Json.Decode as D
 import Json.Encode as E
@@ -12,7 +12,7 @@ type Folder
 type alias FolderInternal =
     { id_ : Id Folder
     , name_ : String
-    , shareKey_ : Maybe String
+    , sharedWith_ : Maybe (List String)
     }
 
 
@@ -21,18 +21,18 @@ new newId newName =
     Folder
         { id_ = newId
         , name_ = newName
-        , shareKey_ = Nothing
+        , sharedWith_ = Nothing
         }
 
 
-shareKey : Folder -> Maybe String
-shareKey (Folder { shareKey_ }) =
-    shareKey_
+isSharing : Folder -> Bool
+isSharing (Folder { sharedWith_ }) =
+    sharedWith_ /= Nothing
 
 
-share : Maybe String -> Folder -> Folder
-share newShare (Folder internal) =
-    Folder { internal | shareKey_ = newShare }
+shareWith : Maybe (List String) -> Folder -> Folder
+shareWith newShare (Folder internal) =
+    Folder { internal | sharedWith_ = newShare }
 
 
 id : Folder -> Id Folder
@@ -64,4 +64,4 @@ decode =
         D.map3 FolderInternal
             (D.field "id" Id.decode)
             (D.field "name" D.string)
-            (D.maybe (D.field "shareKey" D.string))
+            (D.maybe (D.field "sharedWith" (D.list D.string)))
