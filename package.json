@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "elm-test": "^0.19.1-revision2",
-    "lighthouse": "^6.1.1"
+    "lighthouse": "^6.1.1",
+    "elm-json": "^0.2.8"
   },
   "devDependencies": {
     "@dillonkearns/elm-graphql": "^4.0.3",

@@ -1,7 +1,8 @@
 { pkgs ? import <nixpkgs> { system = "x86_64-linux";} }:                                   
 # nixpkgs package set                   
-pkgs.dockerTools.buildLayeredImage { 
+pkgs.dockerTools.buildImage { 
     # helper to build Docker image          
+    fromImage = ./alpine.tar.gz;
     name = "elm-may";             
     # give docker image a name              
     tag = "latest";                    
@@ -11,5 +12,6 @@ pkgs.dockerTools.buildLayeredImage {
       elmPackages.elm
       elmPackages.elm-format
       elm2nix
+      bash
     ];         
 }
