@@ -10,9 +10,10 @@ phases:
   build:
     commands:
       - ./compile.sh
+      - tar cf build.tar.gz build
   post_build:
     commands:
       - echo Build completed on `date`
 artifacts:
   files:
-    - build/
+    - build.tar.gz
