@@ -15,6 +15,6 @@ pkgs.dockerTools.buildImage {
       elmPackages.elm
       elmPackages.elm-format
       elm2nix
-      bash
+      zip
     ]) ++ elmProject.nativeBuildInputs;
 }
