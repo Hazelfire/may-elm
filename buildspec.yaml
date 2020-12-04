@@ -10,10 +10,9 @@ phases:
   build:
     commands:
       - ./compile.sh
-      - zip -r build.zip build
   post_build:
     commands:
       - echo Build completed on `date`
 artifacts:
   files:
-    - build.zip
+    - build/**/*
