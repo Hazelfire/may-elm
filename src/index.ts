@@ -1,32 +1,18 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#800080" />
-    <link rel="manifest" href="manifest.json" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
-    <link rel="stylesheet" href="css/index.css" />
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
-    <script src = "main.js" ></script>
-    <script src="https://js.stripe.com/v3/"></script>
-  <script>
-      if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
-      navigator.serviceWorker.register('sw.js').then(function(registration) {
-        // Success in registration
-      }, function(err) {
-        // Fail in registration
-      });
-    });
-  }
+require("./css/index.css");
+const {Elm} = require('./TodoList.elm');
+const {loadStripe} = require('@stripe/stripe-js');
 
-  </script>
-    <title>May</title>
-</head>
-<body>
-<div id="elmroot"></div>
-  <script>
+// Register the service worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js').then(function(registration) {
+      // Success in registration
+    }, function(err) {
+      // Fail in registration
+    });
+  });
+}
+
 const mockStripe = false;
 const params = new URLSearchParams(window.location.search)
 if(params.has('code')){
@@ -43,7 +29,7 @@ else if(params.has("stripe_status")){
 }
 else {
   var storedData = localStorage.getItem('may-model');
-  var storedData = storedData ? JSON.parse(storedData) : {fs: null};
+  var parsedData = storedData ? JSON.parse(storedData) : {fs: null};
   let code = localStorage.getItem('may-auth-code');
   var tzo = -new Date().getTimezoneOffset(),
         dif = tzo >= 0 ? '+' : '-',
@@ -51,17 +37,17 @@ else {
             var norm = Math.floor(Math.abs(num));
             return (norm < 10 ? '0' : '') + norm;
         };
-  storedData.offset = dif + pad(tzo / 60) + pad(tzo % 60);
+  parsedData.offset = dif + pad(tzo / 60) + pad(tzo % 60);
   if(code){
     // Hey! We just came back from an authentication request. Let's pass the code
     // along with the model and remove the code from local storage (we don't need it anymore)
     // We are going to exchange this for an actual token later
-    storedData.code = code;
+    parsedData.code = code;
     localStorage.removeItem('may-auth-code');
   }
   var app = Elm.TodoList.init({
     node: document.getElementById('elmroot'),
-    flags: storedData
+    flags: parsedData
   });
 
 
@@ -76,7 +62,7 @@ else {
       window.location.replace("http://localhost:3000/stripe")
     }
     else {
-      var stripe = Stripe('pk_live_p7RnEFmP2sWP65uUYysqOomz');
+      var stripe = loadStripe('pk_live_p7RnEFmP2sWP65uUYysqOomz');
       stripe.redirectToCheckout({
         // Make the id field from the Checkout Session creation API response
         // available to this file, so you can provide it as argument here
@@ -95,11 +81,7 @@ else {
       let element = document.getElementById(id)
       if(element){
         element.focus();
-        element.select();
       }
     });
   });
 }
-  </script>
-</body>
-</html>
