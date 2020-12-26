@@ -1530,8 +1530,9 @@ viewFolderDetails offset here time folderView fs =
                                 , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" (ConfirmDeleteFolder folderId) ] ]
                                 ]
                             )
-                       , div [ class "ui segment attached" ]
-                            [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
+
+                       -- , div [ class "ui segment attached" ]
+                       --     [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
                        , div [ class "ui segment attached" ]
                             [ h3 [ class "ui header clearfix" ]
                                 [ viewButton "right floated primary" "Add" (CreateFolder folderId)
