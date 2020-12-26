@@ -3,7 +3,8 @@ if [[ -d build ]]; then
   rm -rf build
 fi;
 mkdir build
-if [[ -v STAGING ]]; then 
+if [ -n "${STAGING+set}" ]; then 
+  echo "Staging Build";
   cp src/May/Urls.elm src/May/ProdUrls.elm
   cp src/May/StageUrls.elm src/May/Urls.elm
   elm make src/TodoList.elm --output=build/main.js
@@ -11,6 +12,7 @@ if [[ -v STAGING ]]; then
   cp src/May/ProdUrls.elm src/May/Urls.elm
   cp -r static/* build
 else 
+  echo "Prod Build";
   elm make src/TodoList.elm --output=build/main.js
   cp -r static/* build
 fi;
