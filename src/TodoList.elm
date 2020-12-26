@@ -30,7 +30,6 @@ import Json.Decode as D
 import Json.Encode as E
 import May.Auth as Auth
 import May.FileSystem as FileSystem exposing (FileSystem)
-import May.Flags as Flags
 import May.Folder as Folder exposing (Folder)
 import May.Id as Id exposing (Id)
 import May.Statistics as Statistics
@@ -171,12 +170,15 @@ type Msg
     | NoOp
 
 
-serviceCost : Int
-serviceCost =
-    3
+type alias InputFlags =
+    { authCode : Maybe String
+    , authTokens : Maybe E.Value
+    , fs : Maybe E.Value
+    , offset : String
+    }
 
 
-main : Program E.Value Model Msg
+main : Program InputFlags Model Msg
 main =
     Browser.element
         { init = init
@@ -204,18 +206,18 @@ encodeLocalStorageSave save =
 
 {-| Initialises from storage modal
 -}
-init : E.Value -> ( Model, Cmd Msg )
-init flagsValue =
+init : InputFlags -> ( Model, Cmd Msg )
+init flags =
     let
         requiredActions =
             [ Time.now |> Task.perform SetTime
             , Time.here |> Task.perform SetZone
             ]
     in
-    case D.decodeValue Flags.decode flagsValue of
-        Ok flags ->
-            case flags.fs of
-                Just fs ->
+    case flags.fs of
+        Just fsValue ->
+            case D.decodeValue FileSystem.decode fsValue of
+                Ok fs ->
                     let
                         initModel =
                             { fs = fs
@@ -234,30 +236,35 @@ init flagsValue =
                         ( Just authCode, _ ) ->
                             ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
 
-                        ( _, Just tokens ) ->
-                            if Auth.hasSubscription tokens then
-                                ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
+                        ( _, Just tokensValue ) ->
+                            case D.decodeValue Auth.tokensDecoder tokensValue of
+                                Ok tokens ->
+                                    if Auth.hasSubscription tokens then
+                                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
 
-                            else
-                                ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
+                                    else
+                                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
+
+                                Err _ ->
+                                    ( initModel, Cmd.batch requiredActions )
 
                         _ ->
                             ( initModel, Cmd.batch requiredActions )
 
-                Nothing ->
+                Err err ->
                     let
-                        ( model, command ) =
-                            saveToLocalStorage
-                                { emptyModel | offset = flags.offset }
+                        model =
+                            { emptyModel | notice = LocalStorageErrorNotice (D.errorToString err) }
                     in
-                    ( model, Cmd.batch (command :: requiredActions) )
+                    ( model, Cmd.batch requiredActions )
 
-        Err err ->
+        Nothing ->
             let
-                model =
-                    { emptyModel | notice = LocalStorageErrorNotice (D.errorToString err) }
+                ( model, command ) =
+                    saveToLocalStorage
+                        { emptyModel | offset = flags.offset }
             in
-            ( model, Cmd.batch requiredActions )
+            ( model, Cmd.batch (command :: requiredActions) )
 
 
 emptyModel : Model
@@ -852,7 +859,7 @@ viewNotice model =
                 [ div
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Welcome to May!" ]
-                    , p [] [ text <| "A May account requires a subscription. The subscription costs $" ++ String.fromInt serviceCost ++ " AUD a month and is charged through ", a [ href "https://stripe.com/" ] [ text "Stripe" ], text ". If you made a mistake and don't want a subscription, you can delete your account. All your tasks and folders will still be saved." ]
+                    , p [] [ text <| "A May account requires a subscription. The subscription costs $3 AUD a month and is charged through ", a [ href "https://stripe.com/" ] [ text "Stripe" ], text ". If you made a mistake and don't want a subscription, you can delete your account. All your tasks and folders will still be saved." ]
                     , button [ class "ui green button", onClick RequestSubscription ] [ text "Get Subscription" ]
                     , button [ class "ui red button", onClick DeleteAccount ] [ text "Remove Account" ]
                     ]
@@ -864,7 +871,7 @@ viewNotice model =
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Are you sure you want an account?" ]
                     , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
-                    , p [] [ text <| "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $" ++ String.fromInt serviceCost ++ " (AUD) a month." ]
+                    , p [] [ text <| "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $3 AUD a month." ]
                     , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
                     , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
                     , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
@@ -893,7 +900,7 @@ viewNotice model =
                     , p [] [ text "Any task that you complete today goes in the Done Today list." ]
                     , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
                     , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
-                    , p [] [ text <| "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $" ++ String.fromInt serviceCost ++ " AUD." ]
+                    , p [] [ text <| "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $3 AUD." ]
                     , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
                     , h5 [] [ text "Privacy and Terms of Service" ]
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]

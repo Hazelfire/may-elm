@@ -1,6 +1,9 @@
 require("./css/index.css");
-const {Elm} = require('./TodoList.elm');
+import {Elm} from  './TodoList';
 const {loadStripe} = require('@stripe/stripe-js');
+import {AppVariables} from './configTypes';
+
+var variables : AppVariables = JSON.parse(process.env.APP_VARIABLES);
 
 // Register the service worker
 if ('serviceWorker' in navigator) {

@@ -5,10 +5,20 @@ import ClosurePlugin from "closure-webpack-plugin";
 import CopyWebpackPlugin from "copy-webpack-plugin";
 import HTMLWebpackPlugin from "html-webpack-plugin";
 import {CleanWebpackPlugin} from "clean-webpack-plugin";
-
+import {AppVariables} from './src/configTypes';
 // Production CSS assets - separate, minimised file
 import MiniCssExtractPlugin from "mini-css-extract-plugin";
 import OptimizeCSSAssetsPlugin from "optimize-css-assets-webpack-plugin";
+
+
+const appVariables : AppVariables = {
+  apiBackendUrl: process.env.API_BACKEND_URL,
+  authBase: process.env.AUTH_BASE,
+  clientId: process.env.CLIENT_ID,
+  redirectUri: process.env.REDIRECT_URI,
+  serviceCost: process.env.SERVICE_COST
+};
+
 
 const config: webpack.Configuration = {
   mode: 'production',
@@ -41,6 +51,9 @@ var common : webpack.Configuration = {
         filename: MODE === "production" ? "[name]-[hash].js" : "index.js"
     },
     plugins: [
+        new webpack.DefinePlugin({
+          "process.env" : { APP_VARIABLES: JSON.stringify(JSON.stringify(appVariables)) }
+        }),
         new HTMLWebpackPlugin({
             // Use this template to get basic responsive meta tags
             template: "src/index.html",
