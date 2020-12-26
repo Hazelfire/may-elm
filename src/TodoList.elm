@@ -171,6 +171,11 @@ type Msg
     | NoOp
 
 
+serviceCost : Int
+serviceCost =
+    3
+
+
 main : Program E.Value Model Msg
 main =
     Browser.element
@@ -847,7 +852,7 @@ viewNotice model =
                 [ div
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Welcome to May!" ]
-                    , p [] [ text "A May account requires a subscription. The subscription costs $10 AUD a month and is charged through ", a [ href "https://stripe.com/" ] [ text "Stripe" ], text ". If you made a mistake and don't want a subscription, you can delete your account. All your tasks and folders will still be saved." ]
+                    , p [] [ text <| "A May account requires a subscription. The subscription costs $" ++ String.fromInt serviceCost ++ " AUD a month and is charged through ", a [ href "https://stripe.com/" ] [ text "Stripe" ], text ". If you made a mistake and don't want a subscription, you can delete your account. All your tasks and folders will still be saved." ]
                     , button [ class "ui green button", onClick RequestSubscription ] [ text "Get Subscription" ]
                     , button [ class "ui red button", onClick DeleteAccount ] [ text "Remove Account" ]
                     ]
@@ -859,7 +864,7 @@ viewNotice model =
                     [ class "noticecontent" ]
                     [ h3 [] [ text "Are you sure you want an account?" ]
                     , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
-                    , p [] [ text "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $3 (AUD) a month." ]
+                    , p [] [ text <| "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $" ++ String.fromInt serviceCost ++ " (AUD) a month." ]
                     , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
                     , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
                     , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
@@ -888,7 +893,7 @@ viewNotice model =
                     , p [] [ text "Any task that you complete today goes in the Done Today list." ]
                     , p [] [ text "Your tasks and folders are coloured according to the section that they fall under." ]
                     , h5 [] [ text "Syncing, Subscriptions and Accounts" ]
-                    , p [] [ text "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $3 AUD." ]
+                    , p [] [ text <| "May works a bit differently from most services. The application will work fine without an account. Getting an account allows you to sync your tasks between your devices, and requires also getting a subscription that costs $" ++ String.fromInt serviceCost ++ " AUD." ]
                     , p [] [ text "You can cancel your subscription at any time, and you tasks will still be on your devices, they just won't sync anymore." ]
                     , h5 [] [ text "Privacy and Terms of Service" ]
                     , p [] [ text "I value your privacy, feel free to value my ", a [ href "/privacy" ] [ text "privacy policy" ], text ". If you have a subscription with May, you agree to my ", a [ href "/tos" ] [ text "terms of service" ], text "." ]
