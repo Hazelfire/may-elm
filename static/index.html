@@ -43,7 +43,7 @@ else if(params.has("stripe_status")){
 }
 else {
   var storedData = localStorage.getItem('may-model');
-  var storedData = storedData ? JSON.parse(storedData) : {flags: null};
+  var storedData = storedData ? JSON.parse(storedData) : {fs: null};
   let code = localStorage.getItem('may-auth-code');
   var tzo = -new Date().getTimezoneOffset(),
         dif = tzo >= 0 ? '+' : '-',

@@ -22,7 +22,7 @@ import Date
 import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
-import Html exposing (Attribute, Html, a, br, button, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
+import Html exposing (Attribute, Html, a, br, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
 import Html.Attributes exposing (checked, class, href, id, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
@@ -69,7 +69,7 @@ type Notice
     | AskConfirmDeleteAccount
     | AskForLogin
     | ShowHelp
-    | LocalStorageErrorNotice
+    | LocalStorageErrorNotice String
 
 
 type SyncStatus
@@ -252,10 +252,10 @@ init flagsValue =
                     in
                     ( model, Cmd.batch (command :: requiredActions) )
 
-        Err _ ->
+        Err err ->
             let
                 model =
-                    { emptyModel | notice = LocalStorageErrorNotice }
+                    { emptyModel | notice = LocalStorageErrorNotice (D.errorToString err) }
             in
             ( model, Cmd.batch requiredActions )
 
@@ -902,7 +902,7 @@ viewNotice model =
                     ]
                 ]
 
-        LocalStorageErrorNotice ->
+        LocalStorageErrorNotice err ->
             div [ class "help notice" ]
                 [ div
                     [ class "noticecontent" ]
@@ -911,6 +911,8 @@ viewNotice model =
                     , p [] [ text "If you're not a developer, the best you can do is contact ", a [ href "mailto:sam@hazelfire.net" ] [ text "sam@hazelfire.net" ], text " and he can get your data back." ]
                     , p [] [ text "If it doesn't bother you too much. You can also erase all data on your current system" ]
                     , a [ href "/", class "ui red button", onClick DeleteData ] [ text "Delete all data" ]
+                    , p [] [ text <| "Here is the error to help find a fix: " ]
+                    , code [] [ text err ]
                     ]
                 ]
 
