@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
+if [[ -d build ]]; then
+  rm -rf build
+fi;
 mkdir build
 if [[ -v STAGING ]]; then 
   cp src/May/Urls.elm src/May/ProdUrls.elm
