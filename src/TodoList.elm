@@ -28,6 +28,7 @@ import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
+import May.AppVariables exposing (AppVariables)
 import May.Auth as Auth
 import May.FileSystem as FileSystem exposing (FileSystem)
 import May.Folder as Folder exposing (Folder)
@@ -35,7 +36,6 @@ import May.Id as Id exposing (Id)
 import May.Statistics as Statistics
 import May.SyncList as SyncList exposing (SyncList)
 import May.Task as Task exposing (Task)
-import May.Urls as Urls
 import Random
 import Scale
 import Task
@@ -59,6 +59,7 @@ type alias Model =
     , notice : Notice
     , authCode : Maybe String
     , offset : String
+    , variables : AppVariables
     }
 
 
@@ -170,15 +171,6 @@ type Msg
     | NoOp
 
 
-type alias AppVariables =
-    { apiBackendUrl : String
-    , authBase : String
-    , clientId : String
-    , redirectUri : String
-    , serviceCost : String
-    }
-
-
 type alias Flags =
     { authCode : Maybe String
     , authTokens : Maybe E.Value
@@ -240,20 +232,21 @@ init flags =
                             , retryCommand = Nothing
                             , authCode = Nothing
                             , offset = flags.offset
+                            , variables = flags.appVariables
                             }
                     in
                     case ( flags.authCode, flags.authTokens ) of
                         ( Just authCode, _ ) ->
-                            ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode GotAuthResponse authCode :: requiredActions) )
+                            ( { initModel | authState = Auth.Authenticating, authCode = Just authCode }, Cmd.batch (Auth.exchangeAuthCode flags.appVariables GotAuthResponse authCode :: requiredActions) )
 
                         ( _, Just tokensValue ) ->
                             case D.decodeValue Auth.tokensDecoder tokensValue of
                                 Ok tokens ->
                                     if Auth.hasSubscription tokens then
-                                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes tokens :: requiredActions) )
+                                        ( { initModel | authState = Auth.Authenticated tokens, syncStatus = Retreiving }, Cmd.batch (requestNodes flags.appVariables tokens :: requiredActions) )
 
                                     else
-                                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription tokens :: requiredActions) )
+                                        ( { initModel | authState = Auth.SubscriptionNeeded tokens, notice = AskForSubscription }, Cmd.batch (checkSubscription flags.appVariables tokens :: requiredActions) )
 
                                 Err _ ->
                                     ( initModel, Cmd.batch requiredActions )
@@ -264,21 +257,24 @@ init flags =
                 Err err ->
                     let
                         model =
-                            { emptyModel | notice = LocalStorageErrorNotice (D.errorToString err) }
+                            emptyModel flags.appVariables
                     in
-                    ( model, Cmd.batch requiredActions )
+                    ( { model | notice = LocalStorageErrorNotice (D.errorToString err) }, Cmd.batch requiredActions )
 
         Nothing ->
             let
+                firstModel =
+                    emptyModel flags.appVariables
+
                 ( model, command ) =
                     saveToLocalStorage
-                        { emptyModel | offset = flags.offset }
+                        { firstModel | offset = flags.offset }
             in
             ( model, Cmd.batch (command :: requiredActions) )
 
 
-emptyModel : Model
-emptyModel =
+emptyModel : AppVariables -> Model
+emptyModel variables =
     { fs = FileSystem.new (Folder.new Id.rootId "My Tasks")
     , viewing = ViewTypeFolder { id = Id.rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False }
     , currentTime = Nothing
@@ -289,6 +285,7 @@ emptyModel =
     , authCode = Nothing
     , retryCommand = Nothing
     , offset = ""
+    , variables = variables
     }
 
 
@@ -336,7 +333,7 @@ update message model =
             case Auth.stateAuthTokens model.authState of
                 Just tokens ->
                     if Auth.authTokenNeedsRefresh time tokens then
-                        ( { newModel | authState = Auth.Authenticating }, Auth.refreshTokens GotAuthResponse tokens )
+                        ( { newModel | authState = Auth.Authenticating }, Auth.refreshTokens model.variables GotAuthResponse tokens )
 
                     else
                         pure newModel
@@ -446,7 +443,7 @@ update message model =
         GotAuthResponse (Err _) ->
             case model.authCode of
                 Just code ->
-                    pure <| { model | authState = Auth.AuthFailed, retryCommand = Just <| Auth.exchangeAuthCode GotAuthResponse code }
+                    pure <| { model | authState = Auth.AuthFailed, retryCommand = Just <| Auth.exchangeAuthCode model.variables GotAuthResponse code }
 
                 Nothing ->
                     pure <| { model | authState = Auth.AuthFailed }
@@ -457,19 +454,19 @@ update message model =
                     ( newModel, command ) =
                         saveToLocalStorage { model | authState = Auth.Authenticated response, syncStatus = Retreiving }
                 in
-                ( newModel, Cmd.batch [ command, requestNodes response ] )
+                ( newModel, Cmd.batch [ command, requestNodes model.variables response ] )
 
             else
                 let
                     ( newModel, command ) =
                         saveToLocalStorage <| { model | authState = Auth.SubscriptionNeeded response, notice = AskForSubscription }
                 in
-                ( newModel, Cmd.batch [ command, checkSubscription response ] )
+                ( newModel, Cmd.batch [ command, checkSubscription model.variables response ] )
 
         RequestSubscription ->
             case Auth.stateAuthTokens model.authState of
                 Just authResponse ->
-                    ( model, requestSubscription authResponse )
+                    ( model, requestSubscription model.variables authResponse )
 
                 _ ->
                     pure model
@@ -480,7 +477,7 @@ update message model =
         GotSubscriptionSessionId (Err _) ->
             withTokens model <|
                 \tokens ->
-                    pure <| { model | authState = Auth.SubscriptionRequestFailed tokens, retryCommand = Just <| requestSubscription tokens }
+                    pure <| { model | authState = Auth.SubscriptionRequestFailed tokens, retryCommand = Just <| requestSubscription model.variables tokens }
 
         GotSubscriptionCheck (Err _) ->
             withTokens model <|
@@ -490,7 +487,7 @@ update message model =
         GotSubscriptionCheck (Ok True) ->
             case Auth.stateAuthTokens model.authState of
                 Just tokens ->
-                    ( { model | authState = Auth.Authenticated tokens, syncStatus = Retreiving, notice = NoNotice }, requestNodes tokens )
+                    ( { model | authState = Auth.Authenticated tokens, syncStatus = Retreiving, notice = NoNotice }, requestNodes model.variables tokens )
 
                 Nothing ->
                     pure model
@@ -498,7 +495,7 @@ update message model =
         GotSubscriptionCheck (Ok False) ->
             withTokens model <|
                 \tokens ->
-                    pure <| { model | authState = Auth.SubscriptionNeeded tokens, retryCommand = Just <| checkSubscription tokens }
+                    pure <| { model | authState = Auth.SubscriptionNeeded tokens, retryCommand = Just <| checkSubscription model.variables tokens }
 
         GotNodes (Ok fsUpdate) ->
             case Auth.stateAuthTokens model.authState of
@@ -523,7 +520,7 @@ update message model =
                     , Cmd.batch
                         (command
                             :: (if needsSync then
-                                    [ sendSyncList authResponse (FileSystem.syncList model.fs) ]
+                                    [ sendSyncList model.variables authResponse (FileSystem.syncList model.fs) ]
 
                                 else
                                     []
@@ -537,12 +534,12 @@ update message model =
         GotNodes (Err _) ->
             withTokens model <|
                 \tokens ->
-                    pure <| { model | syncStatus = RetreiveFailed, retryCommand = Just <| requestNodes tokens }
+                    pure <| { model | syncStatus = RetreiveFailed, retryCommand = Just <| requestNodes model.variables tokens }
 
         GotUpdateSuccess (Err _) ->
             withTokens model <|
                 \tokens ->
-                    pure { model | syncStatus = UpdateFailed, retryCommand = Just <| sendSyncList tokens (FileSystem.syncList model.fs) }
+                    pure { model | syncStatus = UpdateFailed, retryCommand = Just <| sendSyncList model.variables tokens (FileSystem.syncList model.fs) }
 
         GotUpdateSuccess (Ok _) ->
             let
@@ -552,7 +549,7 @@ update message model =
             if SyncList.needsSync newSyncList then
                 withTokens model <|
                     \tokens ->
-                        ( { model | syncStatus = Synced, fs = FileSystem.setSyncList newSyncList model.fs }, sendSyncList tokens newSyncList )
+                        ( { model | syncStatus = Synced, fs = FileSystem.setSyncList newSyncList model.fs }, sendSyncList model.variables tokens newSyncList )
 
             else
                 pure <| { model | syncStatus = Synced, fs = FileSystem.emptySyncList model.fs }
@@ -569,7 +566,7 @@ update message model =
         DeleteAccount ->
             case Auth.stateAuthTokens model.authState of
                 Just tokens ->
-                    ( model, Auth.deleteUser GotDeleteAccount tokens )
+                    ( model, Auth.deleteUser model.variables GotDeleteAccount tokens )
 
                 Nothing ->
                     pure model
@@ -643,7 +640,7 @@ update message model =
                     pure model
 
         DeleteData ->
-            saveToLocalStorage emptyModel
+            saveToLocalStorage (emptyModel model.variables)
 
         ShareFolder fid shareState ->
             let
@@ -663,11 +660,6 @@ update message model =
             pure model
 
 
-backendBase : String
-backendBase =
-    Urls.backendBase
-
-
 withTokens : Model -> (Auth.AuthTokens -> ( Model, Cmd msg )) -> ( Model, Cmd msg )
 withTokens model callback =
     case Auth.stateAuthTokens model.authState of
@@ -678,26 +670,26 @@ withTokens model callback =
             pure model
 
 
-sendSyncList : Auth.AuthTokens -> SyncList -> Cmd Msg
-sendSyncList tokens synclist =
+sendSyncList : AppVariables -> Auth.AuthTokens -> SyncList -> Cmd Msg
+sendSyncList variables tokens synclist =
     SyncList.syncListMutation synclist
-        |> Graphql.Http.mutationRequest (backendBase ++ "/")
+        |> Graphql.Http.mutationRequest (variables.apiBackendUrl ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotUpdateSuccess
 
 
-requestNodes : Auth.AuthTokens -> Cmd Msg
-requestNodes tokens =
+requestNodes : AppVariables -> Auth.AuthTokens -> Cmd Msg
+requestNodes variables tokens =
     FileSystem.updateSelectionSet
-        |> Graphql.Http.queryRequest (backendBase ++ "/")
+        |> Graphql.Http.queryRequest (variables.apiBackendUrl ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotNodes
 
 
-checkSubscription : Auth.AuthTokens -> Cmd Msg
-checkSubscription tokens =
+checkSubscription : AppVariables -> Auth.AuthTokens -> Cmd Msg
+checkSubscription variables tokens =
     checkSubscriptionSelectionSet
-        |> Graphql.Http.queryRequest (backendBase ++ "/")
+        |> Graphql.Http.queryRequest (variables.apiBackendUrl ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotSubscriptionCheck
 
@@ -707,10 +699,10 @@ checkSubscriptionSelectionSet =
     Api.Query.me Api.Object.Me.subscription
 
 
-requestSubscription : Auth.AuthTokens -> Cmd Msg
-requestSubscription tokens =
+requestSubscription : AppVariables -> Auth.AuthTokens -> Cmd Msg
+requestSubscription variables tokens =
     requestSubscriptionSelectionSet
-        |> Graphql.Http.mutationRequest (backendBase ++ "/")
+        |> Graphql.Http.mutationRequest (variables.apiBackendUrl ++ "/")
         |> Auth.withGqlAuthHeader tokens
         |> Graphql.Http.send GotSubscriptionSessionId
 
@@ -734,7 +726,7 @@ saveToLocalStorageAndUpdate model =
                     FileSystem.needsSync model.fs
 
                 sendSyncLists =
-                    sendSyncList tokens (FileSystem.syncList model.fs)
+                    sendSyncList model.variables tokens (FileSystem.syncList model.fs)
 
                 ( newModel, command ) =
                     saveToLocalStorage model
@@ -841,6 +833,11 @@ view model =
             div [] [ text "loading" ]
 
 
+loginUrl : AppVariables -> String
+loginUrl { authBase, clientId, redirectUri } =
+    authBase ++ "/oauth2/authorize?client_id=" ++ clientId ++ "&redirect_uri=" ++ redirectUri ++ "&response_type=code"
+
+
 viewNotice : Model -> Html Msg
 viewNotice model =
     let
@@ -883,7 +880,7 @@ viewNotice model =
                     , p [] [ text "May works a bit differently from most web services. The free version of this application works fine without an account. Getting an account offers you the ability to sync your tasks and folders between your devices." ]
                     , p [] [ text <| "There is no such thing as a free account on May. Getting an account requires a subscription. This subscription costs $3 AUD a month." ]
                     , p [] [ text "By signing up for an account, you agree to our ", a [ href "/tos", target "_black" ] [ text "terms of service" ], text " and our ", a [ href "/privacy", target "_black" ] [ text "privacy policy" ] ]
-                    , a [ class "ui green button", href Urls.loginUrl ] [ text "Get Account" ]
+                    , a [ class "ui green button", href <| loginUrl model.variables ] [ text "Get Account" ]
                     , button [ class "ui grey button", onClick CancelAskForLogin ] [ text "Back to free" ]
                     ]
                 ]
@@ -1190,7 +1187,7 @@ viewHeader model =
 
                                     _ ->
                                         [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
-                                        , a [ class "item", href Urls.loginUrl ] [ text "Login" ]
+                                        , a [ class "item", href <| loginUrl model.variables ] [ text "Login" ]
                                         ]
                                 )
                             ]

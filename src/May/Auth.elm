@@ -29,7 +29,7 @@ import Http
 import Json.Decode as D
 import Json.Encode as E
 import Jwt
-import May.Urls as Urls
+import May.AppVariables exposing (AppVariables)
 import Task exposing (Task)
 import Time
 
@@ -229,10 +229,10 @@ authTokenResponseDecoder =
         (D.field "expires_in" D.int)
 
 
-exchangeAuthCode : (Result String AuthTokens -> a) -> String -> Cmd a
-exchangeAuthCode message authCode =
+exchangeAuthCode : AppVariables -> (Result String AuthTokens -> a) -> String -> Cmd a
+exchangeAuthCode variables message authCode =
     Task.attempt message <|
-        (getTokenTask (exchangeAuthCodeBody authCode)
+        (getTokenTask variables (exchangeAuthCodeBody variables authCode)
             |> Task.andThen authResponseToAuthTokensTask
         )
 
@@ -262,8 +262,8 @@ authResponseToAuthTokens time response =
         }
 
 
-getTokenTask : String -> Task String AuthTokensResponse
-getTokenTask body =
+getTokenTask : AppVariables -> String -> Task String AuthTokensResponse
+getTokenTask { authBase } body =
     Http.task
         { url = authBase ++ "/oauth2/token"
         , method = "POST"
@@ -288,30 +288,20 @@ getTokenTask body =
         }
 
 
-exchangeAuthCodeBody : String -> String
-exchangeAuthCodeBody code =
-    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=" ++ Urls.redirectUri ++ "&code=" ++ code
+exchangeAuthCodeBody : AppVariables -> String -> String
+exchangeAuthCodeBody { clientId, redirectUri } code =
+    "grant_type=authorization_code&client_id=" ++ clientId ++ "&redirect_uri=" ++ redirectUri ++ "&code=" ++ code
 
 
-authBase : String
-authBase =
-    Urls.authBase
+refreshTokenBody : AppVariables -> AuthTokens -> String
+refreshTokenBody { clientId, redirectUri } (AuthTokens { refreshToken }) =
+    "grant_type=refresh_token&client_id=" ++ clientId ++ "&redirect_uri=" ++ redirectUri ++ "&refresh_token=" ++ refreshToken
 
 
-clientId : String
-clientId =
-    Urls.clientId
-
-
-refreshTokenBody : AuthTokens -> String
-refreshTokenBody (AuthTokens { refreshToken }) =
-    "grant_type=refresh_token&client_id=" ++ clientId ++ "&redirect_uri=" ++ Urls.redirectUri ++ "&refresh_token=" ++ refreshToken
-
-
-refreshTokens : (Result String AuthTokens -> a) -> AuthTokens -> Cmd a
-refreshTokens message tokens =
+refreshTokens : AppVariables -> (Result String AuthTokens -> a) -> AuthTokens -> Cmd a
+refreshTokens variables message tokens =
     Task.attempt message <|
-        (getRefreshTokenTask tokens
+        (getRefreshTokenTask variables tokens
             |> Task.andThen authResponseToAuthTokensTask
         )
 
@@ -319,12 +309,12 @@ refreshTokens message tokens =
 {-| The refresh token task doesn't actually have a refresh token in the response
 so I need to handle it a bit differently
 -}
-getRefreshTokenTask : AuthTokens -> Task String AuthTokensResponse
-getRefreshTokenTask tokens =
+getRefreshTokenTask : AppVariables -> AuthTokens -> Task String AuthTokensResponse
+getRefreshTokenTask variables tokens =
     Http.task
-        { url = authBase ++ "/oauth2/token"
+        { url = variables.authBase ++ "/oauth2/token"
         , method = "POST"
-        , body = Http.stringBody "application/x-www-form-urlencoded" (refreshTokenBody tokens)
+        , body = Http.stringBody "application/x-www-form-urlencoded" (refreshTokenBody variables tokens)
         , headers = []
         , timeout = Nothing
         , resolver =
@@ -361,10 +351,10 @@ authTokenNeedsRefresh now (AuthTokens tokens) =
     Time.posixToMillis tokens.expiresAt - Time.posixToMillis now < 5 * 1000 * 60
 
 
-deleteUser : (Result (Graphql.Http.Error Bool) Bool -> a) -> AuthTokens -> Cmd a
-deleteUser message tokens =
+deleteUser : AppVariables -> (Result (Graphql.Http.Error Bool) Bool -> a) -> AuthTokens -> Cmd a
+deleteUser { apiBackendUrl } message tokens =
     deleteUserSelectionSet
-        |> Graphql.Http.mutationRequest (Urls.backendBase ++ "/")
+        |> Graphql.Http.mutationRequest (apiBackendUrl ++ "/")
         |> withGqlAuthHeader tokens
         |> Graphql.Http.send message
 
