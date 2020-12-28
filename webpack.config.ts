@@ -1,7 +1,6 @@
 import * as path from 'path';
 import * as webpack from 'webpack';
 import {merge} from 'webpack-merge';
-import ClosurePlugin from "closure-webpack-plugin";
 import CopyWebpackPlugin from "copy-webpack-plugin";
 import HTMLWebpackPlugin from "html-webpack-plugin";
 import {CleanWebpackPlugin} from "clean-webpack-plugin";
@@ -10,28 +9,26 @@ import {AppVariables} from './src/configTypes';
 import MiniCssExtractPlugin from "mini-css-extract-plugin";
 import OptimizeCSSAssetsPlugin from "optimize-css-assets-webpack-plugin";
 
+function getVariable(name: string) : string {
+  if(process.env[name]){
+    return process.env[name];
+  }
+  else{
+    console.log("Need variable " + name);
+    process.exit(1);
+  }
+}
 
 const appVariables : AppVariables = {
-  apiBackendUrl: process.env.API_BACKEND_URL,
-  authBase: process.env.AUTH_BASE,
-  clientId: process.env.CLIENT_ID,
-  redirectUri: process.env.REDIRECT_URI,
-  serviceCost: process.env.SERVICE_COST
+  apiBackendUrl: getVariable("API_BACKEND_URL"),
+  authBase: getVariable("AUTH_BASE"),
+  clientId: getVariable("CLIENT_ID"),
+  redirectUri: getVariable("REDIRECT_URI"),
+  serviceCost: getVariable("SERVICE_COST")
 };
 
 
-const config: webpack.Configuration = {
-  mode: 'production',
-  entry: './foo.js',
-  output: {
-    path: path.resolve(__dirname, 'dist'),
-    filename: 'foo.bundle.js'
-  }
-};
-
-export default config;
-
-var MODE =
+var MODE : "production" | "development" | "none" =
     process.env.npm_lifecycle_event === "prod" ? "production" : "development";
 var withDebug = !process.env["npm_config_nodebug"] && MODE === "development";
 // this may help for Yarn users
@@ -42,7 +39,7 @@ console.log(
 );
 
 var common : webpack.Configuration = {
-    mode: "development",
+    mode: MODE,
     entry: "./src/index.ts",
     output: {
         path: path.join(__dirname, "dist"),
@@ -52,7 +49,10 @@ var common : webpack.Configuration = {
     },
     plugins: [
         new webpack.DefinePlugin({
-          "process.env" : { APP_VARIABLES: JSON.stringify(JSON.stringify(appVariables)) }
+          "process.env" : 
+            { APP_VARIABLES: JSON.stringify(JSON.stringify(appVariables))
+            , STRIPE_KEY: JSON.stringify(getVariable("STRIPE_KEY"))
+            }
         }),
         new HTMLWebpackPlugin({
             // Use this template to get basic responsive meta tags
@@ -145,21 +145,7 @@ if (MODE === "development") {
 if (MODE === "production") {
     module.exports = merge(common, {
         optimization: {
-            minimizer: [
-                new ClosurePlugin(
-                    {mode: "STANDARD"},
-                    {
-                        // compiler flags here
-                        //
-                        // for debugging help, try these:
-                        //
-                        // formatting: 'PRETTY_PRINT',
-                        // debug: true
-                        // renaming: false
-                    }
-                ),
-                new OptimizeCSSAssetsPlugin({})
-            ]
+            minimize: true
         },
         plugins: [
             // Delete everything from output-path (/dist) and report to user

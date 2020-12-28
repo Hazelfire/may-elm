@@ -12,5 +12,6 @@ pkgs.mkShell {
     chromium
     elm2nix
     elmProject.nativeBuildInputs
+    closurecompiler
   ]);
 }

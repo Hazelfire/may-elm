@@ -19,7 +19,7 @@ export namespace Elm {
     }
     export function init(options: {
       node?: HTMLElement | null;
-      flags: { authCode: string | null; authTokens: unknown | null; fs: unknown | null; offset: string };
+      flags: { authCode: string | null; authTokens: unknown | null; fs: unknown | null; offset: string; appVariables: { apiBackendUrl: string; authBase: string; clientId: string; redirectUri: string; serviceCost: string } };
     }): Elm.TodoList.App;
   }
 }

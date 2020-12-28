@@ -1,7 +1,7 @@
 export interface AppVariables {
-  apiBackendUrl : String;
-  authBase : String;
-  clientId : String;
-  redirectUri : String;
-  serviceCost : String;
+  apiBackendUrl : string;
+  authBase : string;
+  clientId : string;
+  redirectUri : string;
+  serviceCost : string;
 };

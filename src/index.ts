@@ -1,6 +1,6 @@
 require("./css/index.css");
 import {Elm} from  './TodoList';
-const {loadStripe} = require('@stripe/stripe-js');
+import {loadStripe}  from '@stripe/stripe-js';
 import {AppVariables} from './configTypes';
 
 var variables : AppVariables = JSON.parse(process.env.APP_VARIABLES);
@@ -8,9 +8,9 @@ var variables : AppVariables = JSON.parse(process.env.APP_VARIABLES);
 // Register the service worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    navigator.serviceWorker.register('sw.js').then(function(registration) {
+    navigator.serviceWorker.register('sw.js').then(function(_) {
       // Success in registration
-    }, function(err) {
+    }, function(_) {
       // Fail in registration
     });
   });
@@ -33,14 +33,17 @@ else if(params.has("stripe_status")){
 else {
   var storedData = localStorage.getItem('may-model');
   var parsedData = storedData ? JSON.parse(storedData) : {fs: null};
+  var fs = parsedData.fs;
+  var tokens = parsedData.tokens;
   let code = localStorage.getItem('may-auth-code');
   var tzo = -new Date().getTimezoneOffset(),
         dif = tzo >= 0 ? '+' : '-',
-        pad = function(num) {
+        pad = function(num : number) {
             var norm = Math.floor(Math.abs(num));
             return (norm < 10 ? '0' : '') + norm;
         };
-  parsedData.offset = dif + pad(tzo / 60) + pad(tzo % 60);
+  parsedData.appVariables = variables;
+  var offset = dif + pad(tzo / 60) + pad(tzo % 60);
   if(code){
     // Hey! We just came back from an authentication request. Let's pass the code
     // along with the model and remove the code from local storage (we don't need it anymore)
@@ -50,7 +53,12 @@ else {
   }
   var app = Elm.TodoList.init({
     node: document.getElementById('elmroot'),
-    flags: parsedData
+    flags: { appVariables: variables
+           , offset: offset
+           , fs: fs
+           , authTokens: tokens
+           , authCode: code
+    } 
   });
 
 
@@ -65,17 +73,18 @@ else {
       window.location.replace("http://localhost:3000/stripe")
     }
     else {
-      var stripe = loadStripe('pk_live_p7RnEFmP2sWP65uUYysqOomz');
-      stripe.redirectToCheckout({
-        // Make the id field from the Checkout Session creation API response
-        // available to this file, so you can provide it as argument here
-        // instead of the {{CHECKOUT_SESSION_ID}} placeholder.
-        sessionId
-      }).then(function (result) {
-        console.log(result);
-        // If `redirectToCheckout` fails due to a browser or network
-        // error, display the localized error message to your customer
-        // using `result.error.message`.
+      loadStripe(process.env.STRIPE_KEY).then(stripe => {
+        stripe.redirectToCheckout({
+          // Make the id field from the Checkout Session creation API response
+          // available to this file, so you can provide it as argument here
+          // instead of the {{CHECKOUT_SESSION_ID}} placeholder.
+          sessionId
+        }).then(function (result) {
+          console.log(result);
+          // If `redirectToCheckout` fails due to a browser or network
+          // error, display the localized error message to your customer
+          // using `result.error.message`.
+        });
       });
     } 
   });

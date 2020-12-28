@@ -170,15 +170,25 @@ type Msg
     | NoOp
 
 
-type alias InputFlags =
+type alias AppVariables =
+    { apiBackendUrl : String
+    , authBase : String
+    , clientId : String
+    , redirectUri : String
+    , serviceCost : String
+    }
+
+
+type alias Flags =
     { authCode : Maybe String
     , authTokens : Maybe E.Value
     , fs : Maybe E.Value
     , offset : String
+    , appVariables : AppVariables
     }
 
 
-main : Program InputFlags Model Msg
+main : Program Flags Model Msg
 main =
     Browser.element
         { init = init
@@ -206,7 +216,7 @@ encodeLocalStorageSave save =
 
 {-| Initialises from storage modal
 -}
-init : InputFlags -> ( Model, Cmd Msg )
+init : Flags -> ( Model, Cmd Msg )
 init flags =
     let
         requiredActions =

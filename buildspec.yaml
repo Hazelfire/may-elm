@@ -6,14 +6,14 @@ phases:
       - echo Nothing to do in build phase
   pre_build:
     commands:
-      - echo Nothing to do in the pre_build phase...
+      - yarn
   build:
     commands:
-      - ./compile.sh
+      - yarn build
   post_build:
     commands:
       - echo Build completed on `date`
 artifacts:
   files:
     - '**/*'
-  base-directory: build
+  base-directory: dist
