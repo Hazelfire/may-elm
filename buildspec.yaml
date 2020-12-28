@@ -9,7 +9,7 @@ phases:
       - yarn
   build:
     commands:
-      - yarn build
+      - yarn prod
   post_build:
     commands:
       - echo Build completed on `date`
