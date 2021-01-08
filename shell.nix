@@ -13,5 +13,6 @@ pkgs.mkShell {
     elm2nix
     elmProject.nativeBuildInputs
     closurecompiler
+    libuuid
   ]);
 }

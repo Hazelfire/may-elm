@@ -1,4 +1,4 @@
-require("./css/index.css");
+require("./css/index.sass");
 import {Elm} from  './TodoList';
 import {loadStripe}  from '@stripe/stripe-js';
 import {AppVariables} from './configTypes';

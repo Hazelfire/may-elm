@@ -78,6 +78,11 @@ var common : webpack.Configuration = {
                 use: ["style-loader", "css-loader?url=false"]
             },
             {
+                test: /\.sass$/,
+                exclude: [/elm-stuff/, /node_modules/],
+                use: ["style-loader", "css-loader?url=false", "sass-loader"]
+            },
+            {
                 test: /\.woff(2)?(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                 exclude: [/elm-stuff/, /node_modules/],
                 use: {

@@ -9,6 +9,6 @@ registerRoute(
 );
 
 registerRoute(
-  ({url}) => url.hostname === 'localhost' || url.hostname == 'may.hazelfire.net',
+  ({url}) => url.hostname == 'may.hazelfire.net',
   new StaleWhileRevalidate()
 );

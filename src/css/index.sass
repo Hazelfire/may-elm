@@ -1,0 +1,258 @@
+$white: #e3dfffff
+$black: #1c1c1cff
+$brown: #826754ff
+$green: #88ab75ff
+$yellow: #ffc145ff
+$orange: #eb6534ff
+$red: #962f2fff
+$fa-font-path: "../fonts" !default
+@import "~@fortawesome/fontawesome-free/scss/fontawesome.scss"
+@import "~@fortawesome/fontawesome-free/scss/solid.scss"
+
+
+$foreground: $white
+$background: $black
+$noinfo: $brown
+$dolater: $green
+$dosoon: $yellow
+$dotoday: $orange
+$overdue: $red
+
+$menu: $green
+
+body
+  background-color: $background 
+  color: $foreground
+  font-family: sans-serif
+  margin: 0px
+
+.menu
+  display: flex
+  margin: 0px
+  align-items: center
+  background-color: $menu
+  .item
+    margin: 0.2rem
+    display: inline-block
+  .right
+    margin-left: auto
+
+.button
+  background-color: $black
+  border: 0rem
+  color: $foreground
+  border-radius: 0.3rem
+  cursor: pointer
+   
+.mainview
+  display: flex
+  .taskview
+    min-width: 50rem
+    margin: 0rem
+    margin-left: 1rem
+    margin-right: 1rem
+    flex: 1
+  .todoview
+    margin-top: 1rem
+    display: inline-block
+    width: 15rem
+
+  
+.dropdown
+  .menu
+    display: none
+    position: absolute
+    background-color: #f9f9f9
+    min-width: 160px
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2)
+    padding: 12px 16px
+    z-index: 1
+
+.statistics
+  margin-left: auto
+  margin-right: auto
+  text-align: center
+  .statistic
+    display: inline-block
+    margin: 0.5rem
+    text-align: center
+    .value 
+      font-weight: bold
+      font-size: 3rem
+
+.dropdown:hover
+  .menu
+    display: block
+    
+
+
+.ui.statistics
+  justify-content: center
+  margin: unset
+
+.todo
+  padding-left: 0.5em
+
+.editablefield
+  width: unset !important
+
+
+.top-menu
+  border-radius: 0px !important
+
+
+.menu 
+  padding-left: 0px
+
+.header-name
+  flex: 1 !important
+
+.clearfix::after
+  content: ""
+  clear: both
+  display: table
+
+.left-padded 
+  padding-left : 2em !important
+
+.notice 
+  text-align: center
+  padding-left: 2em
+  padding-top: 2em
+  padding-bottom: 2em
+
+
+.noticecontent 
+  text-align: left
+  display: inline-block
+  max-width: 50em
+
+.todosectionheader 
+  margin-top: 1rem !important
+  margin-bottom: 0px !important
+
+.clickable 
+  cursor: pointer
+
+.breadcrumbs
+  list-style: none
+
+.urgencyboxes
+  fill: rgb(255,255,255)
+  stroke-width: 1
+  stroke: rgb(0,0,0)
+
+.dosoonbox 
+  fill: $dosoon !important
+
+
+.dolaterbox 
+  fill: $dolater !important
+
+
+.dotodaybox 
+  fill: $dotoday !important
+
+
+.donebox 
+  fill: $foreground !important
+
+
+.overduebox 
+  fill: $overdue !important
+
+.overdue
+  color: $overdue
+
+.dotoday
+  color: $dotoday
+
+.dosoon
+  color: $dosoon
+
+.dolater
+  color: $dolater
+
+.noinfo
+  color: $noinfo
+
+.done
+  color: $foreground
+
+
+.tasks
+  .folder
+    display: flex
+    .foldername
+      display: inline-block
+      margin-right: auto
+    .icon
+      display: inline-block
+      margin-left: 0rem
+    margin-left: 2rem
+  .task
+    display: flex
+    .taskname
+      margin-left: 3rem
+      .donecheckbox
+        display: inline-block
+        width: 2rem
+      display: inline-block
+      margin-left: 0rem
+      margin-right: auto
+    .taskduration
+      margin-left: 3rem
+      display: inline-block
+    .taskdue
+      margin-left: 3rem
+      display: inline-block
+    
+
+   
+
+.urgencynotice 
+  text-align: left
+
+
+.durationfield 
+  margin-left: 1em
+  max-width: 5rem !important
+
+.breadcrumbblock 
+  display: inline-block
+
+.urgencygraph 
+  max-width: 60em
+
+.icon.overflow
+  @extend %fa-icon
+  @extend .fas
+
+  &:before 
+    content: fa-content($fa-var-ellipsis_v)
+
+.icon.cross
+  @extend %fa-icon
+  @extend .fas
+
+  &:before 
+    content: fa-content($fa-var-times)
+
+.icon.tasks
+  @extend %fa-icon
+  @extend .fas
+
+  &:before 
+    content: fa-content($fa-var-tasks)
+
+.icon.folder
+  @extend %fa-icon
+  @extend .fas
+
+  &:before 
+    content: fa-content($fa-var-folder)
+  
+
+.urgencygraphcontainer 
+  text-align: center
+

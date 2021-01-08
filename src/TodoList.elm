@@ -816,13 +816,13 @@ view model =
                 [ viewHeader model
                 , case model.notice of
                     NoNotice ->
-                        div [ class "ui divided stackable grid" ]
+                        div [ class "mainview" ]
                             [ div
-                                [ class "left-padded twelve wide column" ]
+                                [ class "taskview" ]
                                 [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
                                 , itemView
                                 ]
-                            , div [ class "four wide column" ] [ viewTodo model ]
+                            , div [ class "todoview" ] [ viewTodo model ]
                             ]
 
                     _ ->
@@ -1534,9 +1534,9 @@ viewFolderDetails offset here time folderView fs =
                             _ ->
                                 []
                  )
-                    ++ [ ul [ class "ui menu attached top" ]
+                    ++ [ ul [ class "breadcrumbs" ]
                             (if isRoot then
-                                [ li [ class "item header-name" ] [ text "My Tasks" ]
+                                [ li [ class "breadcrumb" ] [ text "My Tasks" ]
                                 ]
 
                              else
@@ -1547,22 +1547,11 @@ viewFolderDetails offset here time folderView fs =
 
                        -- , div [ class "ui segment attached" ]
                        --     [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
-                       , div [ class "ui segment attached" ]
-                            [ h3 [ class "ui header clearfix" ]
-                                [ viewButton "right floated primary" "Add" (CreateFolder folderId)
-                                , text "Folders"
-                                ]
-                            , viewFolderList here time folderId fs
-                            ]
-                       , div [ class "ui segment attached" ]
-                            [ h3 [ class "ui header clearfix" ]
-                                [ viewButton "right floated primary" "Add" (CreateTask folderId)
-                                , text "Tasks"
-                                , br [] []
-                                , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
-                                ]
-                            , viewTaskList offset here time folderId fs folderView
-                            ]
+                       , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
+                       , viewFolderList here time folderId fs
+                       , viewTaskList offset here time folderId fs folderView
+                       , viewButton "right floated primary" "Add Task" (CreateTask folderId)
+                       , viewButton "right floated primary" "Add Folder" (CreateFolder folderId)
                        ]
                 )
 
@@ -1685,7 +1674,7 @@ viewTaskList offset here time folderId fs folderView =
 
 viewCards : List (Html Msg) -> Html Msg
 viewCards cards =
-    div [ class "ui cards" ] cards
+    div [ class "tasks" ] cards
 
 
 viewIcon : String -> Html msg
@@ -1697,39 +1686,37 @@ labelToColor : Statistics.Label -> String
 labelToColor label =
     case label of
         Statistics.Overdue ->
-            "red"
+            "overdue"
 
         Statistics.DoToday ->
-            "orange"
+            "dotoday"
 
         Statistics.DoSoon ->
-            "green"
+            "dosoon"
 
         Statistics.DoLater ->
-            "purple"
+            "dolater"
 
         Statistics.NoDue ->
-            "blue"
+            "noinfo"
 
         Statistics.Done ->
-            "black"
+            "done"
 
         Statistics.DoneToday ->
-            "black"
+            "done"
 
 
 viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
-    div [ class "ui card" ]
-        [ div [ class "content" ]
-            [ div [ class "right floated ui simple dropdown" ]
-                [ i [ class "dropdown icon" ] []
-                , div [ class "menu" ]
-                    [ div [ class "item", onClick (ConfirmDeleteFolder (Folder.id folder)) ] [ text "Delete" ]
-                    , div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
-                    ]
+    div [ class "folder" ]
+        [ div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
+        , div [ class "dropdown" ]
+            [ i [ class "icon overflow" ] []
+            , div [ class "menu" ]
+                [ div [ class "item", onClick (ConfirmDeleteFolder (Folder.id folder)) ] [ text "Delete" ]
+                , div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
                 ]
-            , div [ class "header clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
             ]
         ]
 
@@ -1740,10 +1727,10 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         checkbox =
             case Task.doneOn task of
                 Nothing ->
-                    viewCheckbox "" False (SetTaskDoneOn (Task.id task) (Just now)) "ui read-only checkbox left floated"
+                    viewCheckbox "" False (SetTaskDoneOn (Task.id task) (Just now)) "donecheckbox"
 
                 Just _ ->
-                    viewCheckbox "" True (SetTaskDoneOn (Task.id task) Nothing) "ui read-only checkbox left floated"
+                    viewCheckbox "" True (SetTaskDoneOn (Task.id task) Nothing) "donecheckbox"
 
         ( nameText, editingName ) =
             Maybe.withDefault ( Task.name task, False ) <|
@@ -1784,30 +1771,24 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         taskId =
             Task.id task
     in
-    div [ class "ui card" ]
-        [ div [ class "content" ]
+    div [ class "task" ]
+        [ div [ class "taskname" ]
             [ checkbox
-            , div [ class "right floated ui simple dropdown" ]
-                [ i [ class "dropdown icon" ] []
-                , div [ class "menu" ]
-                    [ div [ class "item", onClick (ConfirmDeleteTask taskId), tabindex 0 ] [ text "Delete" ]
-                    , div [ class "item", onClick (SelectMoveTask taskId) ] [ text "Move" ]
-                    ]
-                ]
-            , div [ class "header" ]
-                [ viewIcon <| "tasks " ++ labelToColor taskLabel
-                , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
+            , viewIcon <| "tasks " ++ labelToColor taskLabel
+            , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
+            ]
+        , div [ class "taskduration ui right labeled input" ]
+            [ input [ class "durationfield", onBlur (parseFloatMessage (SetTaskDuration taskId) durationText), onInput (ChangeTaskDuration taskId), value durationText ] []
+            , label [ class "ui basic label" ] [ text "hours" ]
+            ]
+        , viewDueField offset zone task
+        , div [ class "right floated ui simple dropdown" ]
+            [ i [ class "icon overflow" ] []
+            , div [ class "menu" ]
+                [ div [ class "item", onClick (ConfirmDeleteTask taskId), tabindex 0 ] [ text "Delete" ]
+                , div [ class "item", onClick (SelectMoveTask taskId) ] [ text "Move" ]
                 ]
             ]
-        , div [ class "content" ]
-            [ div [] [ text "Duration" ]
-            , div [ class "ui right labeled input" ]
-                [ input [ class "durationfield", onBlur (parseFloatMessage (SetTaskDuration taskId) durationText), onInput (ChangeTaskDuration taskId), value durationText ] []
-                , label [ class "ui basic label" ] [ text "hours" ]
-                ]
-            ]
-        , div [ class "content" ]
-            [ viewDueField offset zone task ]
         ]
 
 
@@ -1815,7 +1796,7 @@ viewDueField : String -> Time.Zone -> Task -> Html Msg
 viewDueField offset zone task =
     case Task.due task of
         Just dueDate ->
-            div []
+            div [ class "taskdue" ]
                 [ viewCheckbox "Remove Due Date" True (SetTaskDue (Task.id task) Nothing) ""
                 , div [ class "ui input" ]
                     [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
@@ -1823,6 +1804,6 @@ viewDueField offset zone task =
                 ]
 
         Nothing ->
-            div []
+            div [ class "taskdue" ]
                 [ viewCheckbox "Include Due Date" False (SetTaskDueNow <| Task.id task) ""
                 ]
