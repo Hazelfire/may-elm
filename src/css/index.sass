@@ -80,9 +80,16 @@ body
   .earth
     fill: $darkbrown
   .tree
-    fill: rgba(0,0,0,0)
-    stroke-width: 0.01px
-    stroke: $brown
+    fill: $brown
+    stroke-width: 0
+    stroke: rgba(0,0,0,0)
+
+input:required
+    box-shadow: none !important
+
+input:invalid 
+    box-shadow: 0 0 0px red !important
+
 
 .dosoonleaf
   fill: $dosoon
@@ -103,21 +110,44 @@ body
     margin: 1rem
     flex: 1
     background-color: change-color($white, $alpha: 0.8)
+    border: 0.1rem solid $white
+    
   .todoview
     margin: 1rem
     background-color: change-color($white, $alpha: 0.8)
     margin-top: 1rem
     display: inline-block
     width: 15rem
+    border: 0.1rem solid $white
+
+.modal
+  position: fixed
+  background-color: $white
+  bottom: 0
+  top: 0
+  left: 0
+  right: 0
+  margin: 5% auto
+  max-width: 80%
+  border-radius: 0.5rem
+
+
+.screenmask
+  background: change-color($black, $alpha: 0.8)
+  position: fixed
+  top: 0
+  right: 0
+  bottom: 0
+  left: 0
 
   
 .context
-  width: 2rem
+  width: 1rem
   text-align: center
   
 .dropdown
   .icon
-    font-size: 2rem
+    font-size: 1.5rem
   .menu
     display: none
     position: absolute
@@ -179,6 +209,7 @@ body
   padding-left : 2em !important
 
 .notice 
+ 
   text-align: center
   padding-left: 2em
   padding-top: 2em
@@ -186,9 +217,11 @@ body
 
 
 .noticecontent 
+  background-color: change-color($white, $alpha: 0.8)
+  padding: 2rem
   text-align: left
   display: inline-block
-  max-width: 50em
+  max-width: 52em
 
 .todosectionheader 
   margin-top: 1rem !important
@@ -267,23 +300,27 @@ body
     margin-top: 0.5rem
     display: flex
     align-items: center
+    .donecheckbox
+      display: inline-block
+      width: 2rem
     .taskname
+      display: inline-flex
+      flex: 1
       margin-left: 3rem
-      .donecheckbox
-        display: inline-block
-        width: 2rem
       display: inline-block
       margin-left: 0rem
       margin-right: auto
     .taskduration
-      margin-left: 3rem
+      max-width: 3rem
+      text-align: center  
+      margin-left: 2rem
       display: inline-block
     .taskdue
       .icon
         vertical-align: middle
-        font-size: 2rem
+        font-size: 1rem
       width: 10rem
-      margin-left: 3rem
+      margin-left: 2rem
       display: inline-block
     
 
@@ -335,3 +372,6 @@ body
 .urgencygraphcontainer 
   text-align: center
 
+.folderlist
+  .folderlist
+    margin-left: 3rem

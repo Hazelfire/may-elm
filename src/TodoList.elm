@@ -22,8 +22,8 @@ import Date
 import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
-import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, img, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, href, id, tabindex, target, type_, value)
+import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, novalidate, required, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
@@ -862,6 +862,11 @@ treeHeight =
     0.1
 
 
+treeWidth : Float
+treeWidth =
+    0.02
+
+
 rotatePoint : Float -> ( Float, Float ) -> ( Float, Float )
 rotatePoint angle ( x, y ) =
     ( cos angle * x - sin angle * y, sin angle * x + cos angle * y )
@@ -869,7 +874,7 @@ rotatePoint angle ( x, y ) =
 
 treeRotate : Float
 treeRotate =
-    pi / 8
+    pi / 5
 
 
 leafRotation : Int -> Int -> Float
@@ -877,11 +882,30 @@ leafRotation size index =
     if size == 0 then
         0
 
-    else if modBy 2 index == 0 then
-        treeRotate + leafRotation (size // 2) (index // 2)
-
     else
-        negate treeRotate + leafRotation ((size - 1) // 2) (index // 2)
+        let
+            rotateLeft =
+                modBy 2 (floor (logBase 2 (toFloat size))) == 0
+
+            rightAngle =
+                if rotateLeft then
+                    0
+
+                else
+                    treeRotate
+
+            leftAngle =
+                if rotateLeft then
+                    -treeRotate
+
+                else
+                    0
+        in
+        if modBy 2 index == 0 then
+            rightAngle + leafRotation (size // 2) (index // 2)
+
+        else
+            leftAngle + leafRotation ((size - 1) // 2) (index // 2)
 
 
 leafPosition : Int -> Int -> ( Float, Float )
@@ -891,12 +915,29 @@ leafPosition size index =
 
     else
         let
-            ( x, y ) =
-                if modBy 2 index == 0 then
-                    rotatePoint treeRotate <| leafPosition (size // 2) (index // 2)
+            rotateLeft =
+                modBy 2 (floor (logBase 2 (toFloat size))) == 0
+
+            rightAngle =
+                if rotateLeft then
+                    0
 
                 else
-                    rotatePoint (negate treeRotate) <| leafPosition ((size - 1) // 2) (index // 2)
+                    treeRotate
+
+            leftAngle =
+                if rotateLeft then
+                    -treeRotate
+
+                else
+                    0
+
+            ( x, y ) =
+                if modBy 2 index == 0 then
+                    rotatePoint rightAngle <| leafPosition (size // 2) (index // 2)
+
+                else
+                    rotatePoint leftAngle <| leafPosition ((size - 1) // 2) (index // 2)
         in
         ( reductionFactor * x, reductionFactor * y - treeHeight )
 
@@ -904,18 +945,35 @@ leafPosition size index =
 branchPositions : Int -> List ( Float, Float )
 branchPositions index =
     if index == 0 then
-        [ ( 0, 0 ), ( 0, -treeHeight ) ]
+        [ ( -treeWidth, 0 ), ( 0, -treeHeight ) ]
 
     else
         let
             origin =
-                ( 0, 0 )
+                ( -treeWidth, 0 )
+
+            rotateLeft =
+                modBy 2 (floor (logBase 2 (toFloat index))) == 0
+
+            rightAngle =
+                if rotateLeft then
+                    0
+
+                else
+                    treeRotate
+
+            leftAngle =
+                if rotateLeft then
+                    -treeRotate
+
+                else
+                    0
 
             rights =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint treeRotate) (branchPositions (index // 2))
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint rightAngle) (branchPositions (index // 2))
 
             lefts =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint -treeRotate) (branchPositions ((index - 1) // 2))
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint leftAngle) (branchPositions ((index - 1) // 2))
         in
         origin :: (rights ++ lefts) ++ [ ( 0, -treeHeight ) ]
 
@@ -998,7 +1056,11 @@ viewBackground here now model =
         , Svg.g
             [ SvgAttr.transform [ Svg.Translate 0.5 planetBase ] ]
             (if totalBranches > 0 then
-                constructTreePath (branchPositions (totalBranches - 1))
+                let
+                    branchPos =
+                        branchPositions (totalBranches - 1) ++ [ ( treeWidth, 0 ) ]
+                in
+                constructTreePath branchPos
                     :: (if totalLeaves > 0 then
                             [ Svg.g [] (List.map2 (\leafClass { x, y, angle } -> Svg.g [ SvgAttr.transform [ Svg.Translate x y, Svg.Rotate angle 0 0 ] ] [ viewLeaf leafClass ]) leafClasses (leavePositions totalLeaves totalBranches)) ]
 
@@ -1609,32 +1671,20 @@ viewButton color name message =
 confirmDeleteTaskModal : Id Task -> Html Msg
 confirmDeleteTaskModal taskId =
     div [ class "ui active modal" ]
-        [ div [ class "header" ] [ text "Confirm Delete" ]
-        , div [ class "content" ]
-            [ div [ class "description" ]
-                [ p [] [ text "Are you sure that you want to delete this task?" ] ]
-            ]
-        , div [ class "actions" ]
-            [ div [ class "ui black deny button", onClick ClearEditing ]
-                [ text "Cancel" ]
-            , button [ class "ui positive button", onClick (DeleteTask taskId) ] [ text "Delete" ]
-            ]
+        [ p [] [ text "Are you sure that you want to delete this task?" ]
+        , button [ class "ui black deny button", onClick ClearEditing ]
+            [ text "Cancel" ]
+        , button [ class "ui positive button", onClick (DeleteTask taskId) ] [ text "Delete" ]
         ]
 
 
 confirmDeleteFolderModal : Id Folder -> Html Msg
 confirmDeleteFolderModal folderId =
     div [ class "ui active modal" ]
-        [ div [ class "header" ] [ text "Confirm Delete" ]
-        , div [ class "content" ]
-            [ div [ class "description" ]
-                [ p [] [ text "Are you sure that you want to delete this folder?" ] ]
-            ]
-        , div [ class "actions" ]
-            [ div [ class "ui black deny button", onClick ClearEditing ]
-                [ text "Cancel" ]
-            , button [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
-            ]
+        [ p [] [ text "Are you sure that you want to delete this folder?" ]
+        , button [ class "ui black deny button", onClick ClearEditing ]
+            [ text "Cancel" ]
+        , button [ class "ui positive button", onClick (DeleteFolder folderId) ] [ text "Delete" ]
         ]
 
 
@@ -1656,7 +1706,7 @@ moveFolderModal folderId fs =
         [ i [ class "icon red right floated close clickable", onClick ClearEditing ] []
         , div [ class "header" ] [ text "Move Folder" ]
         , div [ class "content" ]
-            [ div [ class "ui list" ]
+            [ div [ class "folderlist" ]
                 [ folderList (Folder.id >> MoveFolder folderId) (Folder.new Id.rootId "My Tasks") (Just folderId) fs ]
             ]
         ]
@@ -1675,10 +1725,8 @@ folderList cmd folder excluding fs =
     in
     div [ class "item" ]
         [ viewIcon "folder"
-        , div [ class "content" ]
-            [ div [ class "header clickable", onClick (cmd folder) ] [ text <| Folder.name folder ]
-            , div [ class "list" ] childrenElements
-            ]
+        , span [ class "clickable", onClick (cmd folder) ] [ text <| Folder.name folder ]
+        , div [ class "folderlist" ] childrenElements
         ]
 
 
@@ -1721,24 +1769,27 @@ viewFolderDetails offset here time folderView fs =
 
                         _ ->
                             Folder.name folder
+
+                screenmask =
+                    div [ class "screenmask", onClick ClearEditing ] []
             in
             div []
                 ((case folderView.editing of
                     ConfirmingDeleteFolder fid ->
-                        [ confirmDeleteFolderModal fid ]
+                        [ screenmask, confirmDeleteFolderModal fid ]
 
                     MovingFolder childId ->
-                        [ moveFolderModal childId fs ]
+                        [ screenmask, moveFolderModal childId fs ]
 
                     _ ->
                         case folderView.taskEdit of
                             Just { id, editing } ->
                                 case editing of
                                     ConfirmingDeleteTask ->
-                                        [ confirmDeleteTaskModal id ]
+                                        [ screenmask, confirmDeleteTaskModal id ]
 
                                     MovingTask ->
-                                        [ moveTaskModal id fs ]
+                                        [ screenmask, moveTaskModal id fs ]
 
                                     _ ->
                                         []
@@ -1834,10 +1885,12 @@ editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg
             )
         , onBlur (setValue numberValue)
         , onEnter (setValue numberValue)
+        , novalidate True
         , onInput workingMsg
         , onClick currentlyEditingMsg
         , class <|
-            "clickable editablefield"
+            "clickable editablefield "
+                ++ elementId
                 ++ (if editing then
                         " editing"
 
@@ -1867,7 +1920,8 @@ editableField editing elementId name currentlyEditingMsg workingMsg setValue =
         , onInput workingMsg
         , onClick currentlyEditingMsg
         , class <|
-            "clickable editablefield"
+            "clickable editablefield "
+                ++ elementId
                 ++ (if editing then
                         " editing"
 
@@ -2037,11 +2091,9 @@ viewTaskCard offset zone now taskLabel task taskViewM =
             Task.id task
     in
     div [ class "task" ]
-        [ div [ class "taskname" ]
-            [ checkbox
-            , viewIcon <| "tasks " ++ labelToColor taskLabel
-            , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
-            ]
+        [ checkbox
+        , viewIcon <| "tasks " ++ labelToColor taskLabel
+        , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
         , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
         , div [ class "dropdown context" ]
@@ -2059,7 +2111,7 @@ viewDueField offset zone task =
     case Task.due task of
         Just dueDate ->
             div [ class "taskdue" ]
-                [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
+                [ input [ required True, type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
                 , span [ class "clickable icon cross", onClick (SetTaskDue (Task.id task) Nothing) ] []
                 ]
 
