@@ -880,7 +880,7 @@ treeHeight =
 
 treeWidth : Float
 treeWidth =
-    0.02
+    0.01
 
 
 rotatePoint : Float -> ( Float, Float ) -> ( Float, Float )
@@ -958,15 +958,41 @@ leafPosition size index =
         ( reductionFactor * x, reductionFactor * y - treeHeight )
 
 
-branchPositions : Int -> List ( Float, Float )
-branchPositions index =
+last : List a -> Maybe a
+last list =
+    case list of
+        [] ->
+            Nothing
+
+        item :: [] ->
+            Just item
+
+        _ :: rest ->
+            last rest
+
+
+listInit : List a -> List a
+listInit list =
+    case list of
+        [] ->
+            []
+
+        item :: [] ->
+            []
+
+        x :: rest ->
+            x :: listInit rest
+
+
+branchPositions : Float -> Int -> List ( Float, Float )
+branchPositions width index =
     if index == 0 then
-        [ ( -treeWidth, 0 ), ( 0, -treeHeight ) ]
+        [ ( -width, 0 ), ( 0, -treeHeight ), ( width, 0 ) ]
 
     else
         let
             origin =
-                ( -treeWidth, 0 )
+                ( -width, 0 )
 
             rotateLeft =
                 modBy 2 (floor (logBase 2 (toFloat index))) == 0
@@ -985,13 +1011,23 @@ branchPositions index =
                 else
                     0
 
-            rights =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint rightAngle) (branchPositions (index // 2))
-
             lefts =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint leftAngle) (branchPositions ((index - 1) // 2))
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint rightAngle) (branchPositions width (index // 2))
+
+            rights =
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint leftAngle) (branchPositions width ((index - 1) // 2))
         in
-        origin :: (rights ++ lefts) ++ [ ( 0, -treeHeight ) ]
+        case ( last rights, lefts ) of
+            ( Just ( x1, y1 ), ( x2, y2 ) :: restLefts ) ->
+                let
+                    midpoint =
+                        ( (x1 + x2) / 2, (y1 + y2) / 2 )
+                in
+                (( -width, 0 ) :: (listInit rights ++ (midpoint :: restLefts))) ++ [ ( width, 0 ) ]
+
+            _ ->
+                -- Not Possible
+                []
 
 
 type alias LeafTransform =
@@ -1076,7 +1112,7 @@ viewBackground here now model =
             (if totalBranches > 0 then
                 let
                     branchPos =
-                        branchPositions (totalBranches - 1) ++ [ ( treeWidth, 0 ) ]
+                        branchPositions (logBase 2 (toFloat totalBranches + 1) * treeWidth) (totalBranches - 1)
                 in
                 constructTreePath branchPos
                     :: (if totalLeaves > 0 then
