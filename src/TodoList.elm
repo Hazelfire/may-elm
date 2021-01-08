@@ -22,8 +22,8 @@ import Date
 import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
-import Html exposing (Attribute, Html, a, br, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, contenteditable, href, id, tabindex, target, type_, value)
+import Html exposing (Attribute, Html, a, br, button, code, div, h3, h5, i, img, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, src, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
@@ -1189,26 +1189,20 @@ viewHeader model =
                     []
              )
                 ++ [ li [ class "item" ] [ text status ]
-                   , li [ class "item" ]
-                        [ div
-                            [ class <|
-                                "ui simple dropdown"
-                            ]
-                            [ text "Account"
-                            , viewIcon "dropdown"
-                            , div [ class "menu" ]
-                                (case model.authState of
-                                    Auth.Authenticated _ ->
-                                        [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
-                                        , div [ class "item", onClick Logout ] [ text "Logout" ]
-                                        ]
+                   , li [ class "item dropdown" ]
+                        [ text "Account"
+                        , div [ class "menu" ]
+                            (case model.authState of
+                                Auth.Authenticated _ ->
+                                    [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                                    , div [ class "item", onClick Logout ] [ text "Logout" ]
+                                    ]
 
-                                    _ ->
-                                        [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
-                                        , a [ class "item", href <| loginUrl model.variables ] [ text "Login" ]
-                                        ]
-                                )
-                            ]
+                                _ ->
+                                    [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
+                                    , a [ class "item", href <| loginUrl model.variables ] [ text "Login" ]
+                                    ]
+                            )
                         ]
                    ]
             )
@@ -1782,7 +1776,7 @@ viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
     div [ class "folder" ]
         [ div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
-        , div [ class "dropdown" ]
+        , div [ class "dropdown context" ]
             [ i [ class "icon overflow" ] []
             , div [ class "menu" ]
                 [ div [ class "item", onClick (ConfirmDeleteFolder (Folder.id folder)) ] [ text "Delete" ]
@@ -1850,7 +1844,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
             ]
         , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
-        , div [ class "right floated ui simple dropdown" ]
+        , div [ class "dropdown context" ]
             [ i [ class "icon overflow" ] []
             , div [ class "menu" ]
                 [ div [ class "item", onClick (ConfirmDeleteTask taskId), tabindex 0 ] [ text "Delete" ]

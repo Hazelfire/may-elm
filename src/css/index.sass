@@ -1,5 +1,7 @@
 $white: #e3dfffff
 $black: #1c1c1cff
+$blue: #489fb5ff
+$darkbrown: #4a3b30ff
 $brown: #826754ff
 $green: #88ab75ff
 $yellow: #ffc145ff
@@ -10,8 +12,8 @@ $fa-font-path: "../fonts" !default
 @import "~@fortawesome/fontawesome-free/scss/solid.scss"
 
 
-$foreground: $white
-$background: $black
+$foreground: $black
+$background: $blue
 $noinfo: $brown
 $dolater: $green
 $dosoon: $yellow
@@ -33,17 +35,22 @@ input[type=number]
 
 
 .editablefield
-  background-color: $black
-  color: $white
+  background-color: rgba(0,0,0,0)
+  color: $foreground
   border: 0px
   font-size: 1rem
 .editablefield.editing
-  background-color: $white
-  color: $black
+  background-color: $foreground
+  color: $background
     
 
 body
   background-color: $background 
+  background-image: url(icons/MayTree.svg)
+  background-attachment: fixed
+  background-repeat: no-repeat
+  background-position: bottom center
+  min-height: 100vh
   color: $foreground
   font-family: sans-serif
   margin: 0px
@@ -54,13 +61,13 @@ body
   align-items: center
   background-color: $menu
   .item
-    margin: 0.2rem
+    margin: 0.5rem
     display: inline-block
   .right
     margin-left: auto
 
 .button
-  background-color: $black
+  background-color: $background
   border: 0rem
   color: $foreground
   border-radius: 0.3rem
@@ -70,26 +77,30 @@ body
   display: flex
   .taskview
     min-width: 50rem
-    margin: 0rem
-    margin-left: 1rem
-    margin-right: 1rem
+    margin: 1rem
     flex: 1
+    background-color: change-color($white, $alpha: 0.8)
   .todoview
+    margin: 1rem
+    background-color: change-color($white, $alpha: 0.8)
     margin-top: 1rem
     display: inline-block
     width: 15rem
 
   
-.dropdown
+.context
   width: 2rem
   text-align: center
+  
+.dropdown
   .icon
     font-size: 2rem
   .menu
     display: none
     position: absolute
-    background-color: $white
-    color: $black
+    background-color: $foreground
+    transform: translate(-50%,0)
+    color: $background
     .item
       display: block
       cursor: pointer
