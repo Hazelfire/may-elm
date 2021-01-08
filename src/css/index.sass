@@ -104,6 +104,14 @@ input:invalid
   fill: $overdue
 
 .mainview
+  &.hidden
+    opacity: 0.1
+    transition: opacity 2s
+    transition-delay: 3s
+  &:not(.hidden)
+    opacity: 1
+    transition: opacity 0.3s
+    transition-delay: 0s
   display: flex
   .taskview
     min-width: 50rem

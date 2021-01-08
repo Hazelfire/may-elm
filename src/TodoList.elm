@@ -24,7 +24,7 @@ import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
 import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
 import Html.Attributes exposing (checked, class, href, id, novalidate, required, tabindex, target, type_, value)
-import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
+import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput, onMouseEnter, onMouseLeave)
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
@@ -60,6 +60,7 @@ type alias Model =
     , authCode : Maybe String
     , offset : String
     , variables : AppVariables
+    , showTree : Bool
     }
 
 
@@ -169,6 +170,7 @@ type Msg
     | SendRetry
     | DeleteData
     | ShareFolder (Id Folder) Bool
+    | ShowTree Bool
     | NoOp
 
 
@@ -234,6 +236,7 @@ init flags =
                             , authCode = Nothing
                             , offset = flags.offset
                             , variables = flags.appVariables
+                            , showTree = True
                             }
                     in
                     case ( flags.authCode, flags.authTokens ) of
@@ -287,6 +290,7 @@ emptyModel variables =
     , retryCommand = Nothing
     , offset = ""
     , variables = variables
+    , showTree = True
     }
 
 
@@ -674,6 +678,9 @@ update message model =
             in
             saveToLocalStorageAndUpdate fsChange
 
+        ShowTree state ->
+            pure { model | showTree = state }
+
         NoOp ->
             pure model
 
@@ -835,13 +842,22 @@ view model =
                 , viewHeader model
                 , case model.notice of
                     NoNotice ->
-                        div [ class "mainview" ]
+                        div
+                            [ class <|
+                                "mainview"
+                                    ++ (if model.showTree then
+                                            " hidden"
+
+                                        else
+                                            ""
+                                       )
+                            ]
                             [ div
-                                [ class "taskview" ]
+                                [ class "taskview", onMouseEnter (ShowTree False), onMouseLeave (ShowTree True) ]
                                 [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
                                 , itemView
                                 ]
-                            , div [ class "todoview" ] [ viewTodo model ]
+                            , div [ class "todoview", onMouseEnter (ShowTree False), onMouseLeave (ShowTree True) ] [ viewTodo model ]
                             ]
 
                     _ ->
@@ -1051,6 +1067,8 @@ viewBackground here now model =
             , SvgPx.cy (1 + planetSize - planetHeight)
             , SvgPx.r planetSize
             , SvgAttr.class [ "earth" ]
+            , Svg.onMouseEnter (ShowTree True)
+            , Svg.onMouseLeave (ShowTree False)
             ]
             []
         , Svg.g
