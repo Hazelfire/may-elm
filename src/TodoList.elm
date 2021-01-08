@@ -22,8 +22,8 @@ import Date
 import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
-import Html exposing (Attribute, Html, a, br, button, code, div, h3, h5, i, img, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, href, id, src, tabindex, target, type_, value)
+import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, img, input, label, li, nav, p, span, text, ul)
+import Html.Attributes exposing (checked, class, href, id, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
@@ -831,7 +831,7 @@ view model =
                             viewStatisticsDetails here now model task
             in
             div []
-                [ viewBackground model
+                [ viewBackground here now model
                 , viewHeader model
                 , case model.notice of
                     NoNotice ->
@@ -852,17 +852,137 @@ view model =
             div [] [ text "loading" ]
 
 
-viewBackground : Model -> Html Msg
-viewBackground _ =
+reductionFactor : Float
+reductionFactor =
+    0.9
+
+
+treeHeight : Float
+treeHeight =
+    0.1
+
+
+rotatePoint : Float -> ( Float, Float ) -> ( Float, Float )
+rotatePoint angle ( x, y ) =
+    ( cos angle * x - sin angle * y, sin angle * x + cos angle * y )
+
+
+treeRotate : Float
+treeRotate =
+    pi / 8
+
+
+leafRotation : Int -> Int -> Float
+leafRotation size index =
+    if size == 0 then
+        0
+
+    else if modBy 2 index == 0 then
+        treeRotate + leafRotation (size // 2) (index // 2)
+
+    else
+        negate treeRotate + leafRotation ((size - 1) // 2) (index // 2)
+
+
+leafPosition : Int -> Int -> ( Float, Float )
+leafPosition size index =
+    if size == 0 then
+        ( 0, -treeHeight )
+
+    else
+        let
+            ( x, y ) =
+                if modBy 2 index == 0 then
+                    rotatePoint treeRotate <| leafPosition (size // 2) (index // 2)
+
+                else
+                    rotatePoint (negate treeRotate) <| leafPosition ((size - 1) // 2) (index // 2)
+        in
+        ( reductionFactor * x, reductionFactor * y - treeHeight )
+
+
+branchPositions : Int -> List ( Float, Float )
+branchPositions index =
+    if index == 0 then
+        [ ( 0, 0 ), ( 0, -treeHeight ) ]
+
+    else
+        let
+            origin =
+                ( 0, 0 )
+
+            rights =
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint treeRotate) (branchPositions (index // 2))
+
+            lefts =
+                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint -treeRotate) (branchPositions ((index - 1) // 2))
+        in
+        origin :: (rights ++ lefts) ++ [ ( 0, -treeHeight ) ]
+
+
+type alias LeafTransform =
+    { x : Float
+    , y : Float
+    , angle : Float
+    }
+
+
+leavePositions : Int -> Int -> List LeafTransform
+leavePositions leafCount size =
+    if leafCount == 0 then
+        []
+
+    else
+        let
+            ( x, y ) =
+                leafPosition (size - 1) (leafCount - 1)
+
+            angle =
+                leafRotation (size - 1) (leafCount - 1)
+        in
+        { x = x, y = y, angle = angle * 180 / pi } :: leavePositions (leafCount - 1) size
+
+
+viewBackground : Time.Zone -> Time.Posix -> Model -> Html Msg
+viewBackground here now model =
     let
+        labeledTasks =
+            Statistics.labelTasks here now (FileSystem.allTasks model.fs)
+
         planetHeight =
             0.2
 
         planetSize =
             3
 
-        leaves =
-            1
+        redLeaves =
+            List.length labeledTasks.overdue
+
+        orangeLeaves =
+            List.length labeledTasks.doToday
+
+        yellowLeaves =
+            List.length labeledTasks.doSoon
+
+        greenLeaves =
+            List.length labeledTasks.doLater
+
+        extraBranches =
+            List.length labeledTasks.noDue
+
+        totalLeaves =
+            redLeaves + orangeLeaves + yellowLeaves + greenLeaves
+
+        totalBranches =
+            totalLeaves + extraBranches
+
+        leafClasses =
+            List.concat
+                [ List.repeat redLeaves "overdueleaf"
+                , List.repeat orangeLeaves "dotodayleaf"
+                , List.repeat yellowLeaves "dosoonleaf"
+                , List.repeat greenLeaves "dolaterleaf"
+                ]
 
         planetBase =
             1 - planetHeight
@@ -875,8 +995,43 @@ viewBackground _ =
             , SvgAttr.class [ "earth" ]
             ]
             []
-        , Svg.g [ SvgAttr.transform [ Svg.Translate 0.5 planetBase ] ] [ viewLeaf "dotodayleaf" ]
+        , Svg.g
+            [ SvgAttr.transform [ Svg.Translate 0.5 planetBase ] ]
+            (if totalBranches > 0 then
+                constructTreePath (branchPositions (totalBranches - 1))
+                    :: (if totalLeaves > 0 then
+                            [ Svg.g [] (List.map2 (\leafClass { x, y, angle } -> Svg.g [ SvgAttr.transform [ Svg.Translate x y, Svg.Rotate angle 0 0 ] ] [ viewLeaf leafClass ]) leafClasses (leavePositions totalLeaves totalBranches)) ]
+
+                        else
+                            []
+                       )
+
+             else
+                []
+            )
         ]
+
+
+constructTreePath : List ( Float, Float ) -> Svg.Svg Msg
+constructTreePath points =
+    case points of
+        ( x, y ) :: tail ->
+            Svg.path
+                [ SvgAttr.class [ "tree" ]
+                , SvgAttr.d <|
+                    String.join " "
+                        ([ "M"
+                         , String.fromFloat x
+                         , String.fromFloat y
+                         ]
+                            ++ List.map (\( x2, y2 ) -> String.join " " [ "L", String.fromFloat x2, String.fromFloat y2 ]) tail
+                        )
+                ]
+                []
+
+        _ ->
+            -- What the hell is a path with one point?! No!!! (Should never happen)
+            Svg.g [] []
 
 
 viewLeaf : String -> Svg.Svg Msg
@@ -890,7 +1045,7 @@ viewLeaf leafClass =
     in
     Svg.path
         [ SvgAttr.class [ leafClass ]
-        , SvgAttr.transform [ Svg.Scale 0.2 0.2, Svg.Rotate 180 0 0 ]
+        , SvgAttr.transform [ Svg.Scale 0.1 0.1, Svg.Rotate 180 0 0 ]
         , SvgAttr.d <| "M 0 1 C -" ++ upperWidth ++ " 0 ,-" ++ lowerWidth ++ " 0 ,0 0 C " ++ lowerWidth ++ " 0, " ++ upperWidth ++ " 0, 0 1"
         ]
         []
