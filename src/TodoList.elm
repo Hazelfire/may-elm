@@ -397,8 +397,11 @@ update message model =
             let
                 fsChange =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.setDuration duration)) model
+
+                ( newModel, command ) =
+                    saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
             in
-            saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+            ( newModel, Cmd.batch [ command, setBlur "taskduration" ] )
 
         SetTaskDue tid due ->
             saveToLocalStorageAndUpdate <| mapFileSystem (FileSystem.mapOnTask tid (Task.setDue due)) model
@@ -1555,8 +1558,11 @@ viewFolderDetails offset here time folderView fs =
                                 ]
 
                              else
-                                [ li [ class "item header-name" ] [ div [ class "breadcrumb-block" ] [ div [ class "ui breadcrumb" ] (viewBreadcrumbSections fs folderId) ], editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId)) ]
-                                , ul [ class "right menu" ] [ li [ class "item" ] [ viewButton "red" "Delete" (ConfirmDeleteFolder folderId) ] ]
+                                [ li [ class "item header-name" ]
+                                    [ div [ class "breadcrumb" ] [ div [ class "" ] (viewBreadcrumbSections fs folderId) ]
+                                    , editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
+                                    ]
+                                , viewButton "deletebutton" "Delete" (ConfirmDeleteFolder folderId)
                                 ]
                             )
 
@@ -1686,12 +1692,12 @@ viewBreadcrumbSections fs folderId =
     case FileSystem.folderParent folderId fs of
         Just parentId ->
             if parentId == Id.rootId then
-                [ a [ class "section", onClick (SetView parentId) ] [ text "My Tasks" ], div [ class "divider" ] [ text "/" ] ]
+                [ a [ class "breadcrumb clickable", onClick (SetView parentId) ] [ text "My Tasks" ], div [ class "divider" ] [ text "/" ] ]
 
             else
                 case FileSystem.getFolder parentId fs of
                     Just folder ->
-                        viewBreadcrumbSections fs parentId ++ [ a [ class "section", onClick (SetView parentId) ] [ text (Folder.name folder) ], div [ class "divider" ] [ text "/" ] ]
+                        viewBreadcrumbSections fs parentId ++ [ a [ class "clickable section", onClick (SetView parentId) ] [ text (Folder.name folder) ], div [ class "divider" ] [ text "/" ] ]
 
                     Nothing ->
                         []

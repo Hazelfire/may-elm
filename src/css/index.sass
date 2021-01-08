@@ -81,14 +81,24 @@ body
 
   
 .dropdown
+  width: 2rem
+  text-align: center
+  .icon
+    font-size: 2rem
   .menu
     display: none
     position: absolute
-    background-color: #f9f9f9
-    min-width: 160px
-    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2)
-    padding: 12px 16px
+    background-color: $white
+    color: $black
+    .item
+      display: block
+      cursor: pointer
+      &:hover
+        color: $green
     z-index: 1
+  &:hover
+    .menu
+      display: block
 
 .statistics
   margin-left: auto
@@ -102,9 +112,6 @@ body
       font-weight: bold
       font-size: 3rem
 
-.dropdown:hover
-  .menu
-    display: block
     
 
 
@@ -156,8 +163,17 @@ body
 .clickable 
   cursor: pointer
 
+
+.button.deletebutton
+  background-color: $red
+  color: $white
+
 .breadcrumbs
   list-style: none
+  .breadcrumb
+    display: inline-block
+  .divider
+    display: inline-block
 
 .urgencyboxes
   fill: rgb(255,255,255)
@@ -204,6 +220,7 @@ body
 
 .tasks
   .folder
+    margin-top: 0.5rem
     display: flex
     .foldername
       display: inline-block
@@ -213,7 +230,9 @@ body
       margin-left: 0rem
     margin-left: 2rem
   .task
+    margin-top: 0.5rem
     display: flex
+    align-items: center
     .taskname
       margin-left: 3rem
       .donecheckbox
@@ -226,6 +245,10 @@ body
       margin-left: 3rem
       display: inline-block
     .taskdue
+      .icon
+        vertical-align: middle
+        font-size: 2rem
+      width: 10rem
       margin-left: 3rem
       display: inline-block
     

@@ -90,9 +90,10 @@ else {
   });
   app.ports.setFocus.subscribe(function(id) {
     window.requestAnimationFrame(() => {
-      let element = document.getElementById(id)
+      let element = document.getElementById(id) as HTMLInputElement
       if(element){
         element.focus();
+        element.select();
       }
     });
   });
