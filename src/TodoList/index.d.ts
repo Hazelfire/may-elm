@@ -12,6 +12,9 @@ export namespace Elm {
         setFocus: {
           subscribe(callback: (data: string) => void): void
         }
+        setBlur: {
+          subscribe(callback: (data: string) => void): void
+        }
         openStripe: {
           subscribe(callback: (data: string) => void): void
         }

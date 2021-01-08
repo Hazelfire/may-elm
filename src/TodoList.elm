@@ -131,6 +131,7 @@ type Msg
     | CreateTask (Id Folder)
     | NewTask (Id Folder) (Id Task)
     | StartEditingTaskName (Id Task) String
+    | StartEditingTaskDuration (Id Task) String
     | RequestSubscription
     | StartEditingFolderName String
     | ChangeFolderName String
@@ -300,6 +301,9 @@ port setLocalStorage : E.Value -> Cmd msg
 port setFocus : String -> Cmd msg
 
 
+port setBlur : String -> Cmd msg
+
+
 port openStripe : String -> Cmd msg
 
 
@@ -355,6 +359,14 @@ update message model =
                 _ ->
                     pure model
 
+        StartEditingTaskDuration id name ->
+            case model.viewing of
+                ViewTypeFolder folderView ->
+                    ( { model | viewing = ViewTypeFolder { folderView | taskEdit = Just { id = id, editing = EditingTaskDuration name } } }, setFocus "taskduration" )
+
+                _ ->
+                    pure model
+
         SetFolderName fid name ->
             let
                 fsChange =
@@ -366,8 +378,11 @@ update message model =
             let
                 fsChange =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.rename name)) model
+
+                ( newModel, command ) =
+                    saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
             in
-            saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+            ( newModel, Cmd.batch [ command, setBlur "taskname" ] )
 
         ChangeTaskName newName ->
             pure <| mapViewing (mapTaskView (mapTaskEditing (always (EditingTaskName newName)))) model
@@ -1607,10 +1622,46 @@ onEnter message =
     on "keydown" (D.map (restrictMessage ((==) 13) (always message)) keyCode)
 
 
+editableNumberField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
+editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg setValue =
+    input
+        [ id
+            (if editing then
+                elementId
+
+             else
+                ""
+            )
+        , onBlur (setValue numberValue)
+        , onEnter (setValue numberValue)
+        , onInput workingMsg
+        , onClick currentlyEditingMsg
+        , class <|
+            "clickable editablefield"
+                ++ (if editing then
+                        " editing"
+
+                    else
+                        ""
+                   )
+        , tabindex 0
+        , onFocus currentlyEditingMsg
+        , value numberValue
+        , type_ "number"
+        ]
+        []
+
+
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
 editableField editing elementId name currentlyEditingMsg workingMsg setValue =
     input
-        [ id elementId
+        [ id
+            (if editing then
+                elementId
+
+             else
+                ""
+            )
         , onBlur (setValue name)
         , onEnter (setValue name)
         , onInput workingMsg
@@ -1764,14 +1815,14 @@ viewTaskCard offset zone now taskLabel task taskViewM =
                     _ ->
                         Nothing
 
-        durationText =
-            Maybe.withDefault (String.fromFloat (Task.duration task)) <|
+        ( durationText, editingDuration ) =
+            Maybe.withDefault ( String.fromFloat (Task.duration task), False ) <|
                 case taskViewM of
                     Just taskView ->
                         case taskView.editing of
                             EditingTaskDuration duration ->
                                 if taskView.id == Task.id task then
-                                    Just duration
+                                    Just ( duration, True )
 
                                 else
                                     Nothing
@@ -1791,10 +1842,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
             , viewIcon <| "tasks " ++ labelToColor taskLabel
             , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
             ]
-        , div [ class "taskduration ui right labeled input" ]
-            [ input [ class "durationfield", onBlur (parseFloatMessage (SetTaskDuration taskId) durationText), onInput (ChangeTaskDuration taskId), value durationText ] []
-            , label [ class "ui basic label" ] [ text "hours" ]
-            ]
+        , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
         , div [ class "right floated ui simple dropdown" ]
             [ i [ class "icon overflow" ] []
@@ -1811,13 +1859,11 @@ viewDueField offset zone task =
     case Task.due task of
         Just dueDate ->
             div [ class "taskdue" ]
-                [ viewCheckbox "Remove Due Date" True (SetTaskDue (Task.id task) Nothing) ""
-                , div [ class "ui input" ]
-                    [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
-                    ]
+                [ input [ type_ "date", value (Date.toIsoString (Date.fromPosix zone dueDate)), onInput (restrictMessageMaybe (parseDate offset >> Maybe.map Just) (SetTaskDue (Task.id task))) ] []
+                , span [ class "clickable icon cross", onClick (SetTaskDue (Task.id task) Nothing) ] []
                 ]
 
         Nothing ->
             div [ class "taskdue" ]
-                [ viewCheckbox "Include Due Date" False (SetTaskDueNow <| Task.id task) ""
+                [ span [ class "clickable noinfo", onClick (SetTaskDueNow <| Task.id task) ] [ text "No Due Date" ]
                 ]

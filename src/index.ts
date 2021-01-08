@@ -96,4 +96,12 @@ else {
       }
     });
   });
+  app.ports.setBlur.subscribe(function(id) {
+    let element = document.getElementById(id)
+    if(element){
+      element.blur();
+    }
+    window.requestAnimationFrame(() => {
+    });
+  });
 }
