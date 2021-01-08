@@ -23,7 +23,7 @@ import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
 import Html exposing (Attribute, Html, a, br, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, href, id, tabindex, target, type_, value)
+import Html.Attributes exposing (checked, class, contenteditable, href, id, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
@@ -1300,12 +1300,12 @@ viewTodo model =
                     model.fs
 
                 sections =
-                    [ createTodoSection fs "red" "Overdue" labeledTasks.overdue .task (always "")
-                    , createTodoSection fs "orange" "Do Today" labeledTasks.doToday (Tuple.first >> .task) addPercentages
-                    , createTodoSection fs "green" "Do Soon" labeledTasks.doSoon .task addDueDates
-                    , createTodoSection fs "purple" "Do Later" labeledTasks.doLater .task addDueDates
-                    , createTodoSection fs "blue" "No Info" labeledTasks.noDue id (always "")
-                    , createTodoSection fs "black" "Done today" doneToday id addDurations
+                    [ createTodoSection fs "overdue" "Overdue" labeledTasks.overdue .task (always "")
+                    , createTodoSection fs "dotoday" "Do Today" labeledTasks.doToday (Tuple.first >> .task) addPercentages
+                    , createTodoSection fs "dosoon" "Do Soon" labeledTasks.doSoon .task addDueDates
+                    , createTodoSection fs "dolater" "Do Later" labeledTasks.doLater .task addDueDates
+                    , createTodoSection fs "noinfo" "No Info" labeledTasks.noDue id (always "")
+                    , createTodoSection fs "done" "Done today" doneToday id addDurations
                     ]
 
                 allSections =
@@ -1609,11 +1609,25 @@ onEnter message =
 
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
 editableField editing elementId name currentlyEditingMsg workingMsg setValue =
-    if editing then
-        div [ class "ui input editablefield" ] [ input [ id elementId, onEnter (setValue name), onBlur (setValue name), onInput workingMsg, value name ] [] ]
+    input
+        [ id elementId
+        , onBlur (setValue name)
+        , onEnter (setValue name)
+        , onInput workingMsg
+        , onClick currentlyEditingMsg
+        , class <|
+            "clickable editablefield"
+                ++ (if editing then
+                        " editing"
 
-    else
-        span [ onClick currentlyEditingMsg, class "clickable", tabindex 0, onFocus currentlyEditingMsg ] [ text name ]
+                    else
+                        ""
+                   )
+        , tabindex 0
+        , onFocus currentlyEditingMsg
+        , value name
+        ]
+        []
 
 
 viewBreadcrumbSections : FileSystem -> Id Folder -> List (Html Msg)
