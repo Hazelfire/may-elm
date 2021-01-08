@@ -41,7 +41,7 @@ import Scale
 import Task
 import Time
 import TypedSvg as Svg
-import TypedSvg.Attributes as Svg
+import TypedSvg.Attributes as SvgAttr
 import TypedSvg.Attributes.InPx as SvgPx
 import TypedSvg.Core as Svg
 import TypedSvg.Events as Svg
@@ -831,7 +831,8 @@ view model =
                             viewStatisticsDetails here now model task
             in
             div []
-                [ viewHeader model
+                [ viewBackground model
+                , viewHeader model
                 , case model.notice of
                     NoNotice ->
                         div [ class "mainview" ]
@@ -849,6 +850,50 @@ view model =
 
         _ ->
             div [] [ text "loading" ]
+
+
+viewBackground : Model -> Html Msg
+viewBackground _ =
+    let
+        planetHeight =
+            0.2
+
+        planetSize =
+            3
+
+        leaves =
+            1
+
+        planetBase =
+            1 - planetHeight
+    in
+    Svg.svg [ SvgAttr.viewBox 0 0 1 1, SvgAttr.class [ "background" ] ]
+        [ Svg.circle
+            [ SvgPx.cx 0.5
+            , SvgPx.cy (1 + planetSize - planetHeight)
+            , SvgPx.r planetSize
+            , SvgAttr.class [ "earth" ]
+            ]
+            []
+        , Svg.g [ SvgAttr.transform [ Svg.Translate 0.5 planetBase ] ] [ viewLeaf "dotodayleaf" ]
+        ]
+
+
+viewLeaf : String -> Svg.Svg Msg
+viewLeaf leafClass =
+    let
+        upperWidth =
+            String.fromFloat 0.5
+
+        lowerWidth =
+            String.fromFloat 0.1
+    in
+    Svg.path
+        [ SvgAttr.class [ leafClass ]
+        , SvgAttr.transform [ Svg.Scale 0.2 0.2, Svg.Rotate 180 0 0 ]
+        , SvgAttr.d <| "M 0 1 C -" ++ upperWidth ++ " 0 ,-" ++ lowerWidth ++ " 0 ,0 0 C " ++ lowerWidth ++ " 0, " ++ upperWidth ++ " 0, 0 1"
+        ]
+        []
 
 
 loginUrl : AppVariables -> String
@@ -1076,14 +1121,14 @@ viewGroups here tasks =
                 yscale =
                     Scale.linear ( height - 2 * padding, 0 ) ( 0, ft.urgency )
             in
-            Svg.svg [ Svg.viewBox 0 0 width height, Svg.class [ "urgencygraph" ], Svg.onMouseLeave (SetUrgencyTaskHover Nothing) ]
-                [ Svg.g [ Svg.class [ "axis" ], Svg.transform [ Svg.Translate padding padding ] ]
+            Svg.svg [ SvgAttr.viewBox 0 0 width height, SvgAttr.class [ "urgencygraph" ], Svg.onMouseLeave (SetUrgencyTaskHover Nothing) ]
+                [ Svg.g [ SvgAttr.class [ "axis" ], SvgAttr.transform [ Svg.Translate padding padding ] ]
                     [ Axis.left [ Axis.tickCount 10 ] yscale
                     ]
-                , Svg.g [ Svg.class [ "axis" ], Svg.transform [ Svg.Translate padding (height - padding) ] ]
+                , Svg.g [ SvgAttr.class [ "axis" ], SvgAttr.transform [ Svg.Translate padding (height - padding) ] ]
                     [ Axis.bottom [ Axis.tickCount 10 ] xscale
                     ]
-                , Svg.g [ Svg.transform [ Svg.Translate padding padding ], Svg.class [ "urgencyboxes" ] ]
+                , Svg.g [ SvgAttr.transform [ Svg.Translate padding padding ], SvgAttr.class [ "urgencyboxes" ] ]
                     (List.map (viewUrgencyTaskBar xscale yscale) tasks)
                 ]
 
@@ -1104,7 +1149,7 @@ viewUrgencyTaskBar xscale yscale { label, parent, urgency, start, end, task } =
         , SvgPx.height (max - Scale.convert yscale urgency)
         , Svg.onClick (SetView parent)
         , Svg.onMouseEnter (SetUrgencyTaskHover (Just { task = task, start = start, urgency = urgency, end = end }))
-        , Svg.class
+        , SvgAttr.class
             [ case label of
                 Statistics.DoSoon ->
                     "dosoonbox"

@@ -46,7 +46,6 @@ input[type=number]
 
 body
   background-color: $background 
-  background-image: url(icons/MayTree.svg)
   background-attachment: fixed
   background-repeat: no-repeat
   background-position: bottom center
@@ -73,6 +72,20 @@ body
   border-radius: 0.3rem
   cursor: pointer
    
+.background
+  position: fixed 
+  width: 100vw
+  height: 100vh
+  z-index: -100
+  .earth
+    fill: $darkbrown
+
+.dosoonleaf
+  fill: $dosoon
+
+.dotodayleaf
+  fill: $dotoday
+
 .mainview
   display: flex
   .taskview
