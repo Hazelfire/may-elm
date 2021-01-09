@@ -11,6 +11,7 @@ $fa-font-path: "../fonts" !default
 @import "~@fortawesome/fontawesome-free/scss/fontawesome.scss"
 @import "~@fortawesome/fontawesome-free/scss/solid.scss"
 
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed&family=Bodoni+Moda&display=swap')
 
 $foreground: $black
 $background: $blue
@@ -28,6 +29,9 @@ input::-webkit-inner-spin-button
   -webkit-appearance: none
   margin: 0
 
+input, textarea, select 
+  font-family: inherit
+
 
 /* Firefox */
 input[type=number] 
@@ -43,6 +47,13 @@ input[type=number]
   background-color: $foreground
   color: $background
     
+@mixin serif 
+  font-family: 'Bodoni Moda', serif
+
+@mixin sans
+  font-family: 'Barlow Semi Condensed', sans-serif
+
+
 
 body
   background-color: $background 
@@ -51,7 +62,7 @@ body
   background-position: bottom center
   min-height: 100vh
   color: $foreground
-  font-family: sans-serif
+  @include sans
   margin: 0px
 
 .menu
@@ -176,7 +187,9 @@ input:invalid
     .menu
       display: block
 
+
 .statistics
+  @include serif
   margin-left: auto
   margin-right: auto
   text-align: center
@@ -308,11 +321,11 @@ input:invalid
       vertical-align: middle
       display: inline
       margin-left: 0rem
-    margin-left: 0rem
 
   @media only screen and (min-width: 700px)
     .folder
       display: flex
+      margin-left: 2rem
       .foldername
         flex: 1
 
