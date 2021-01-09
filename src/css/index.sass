@@ -116,7 +116,7 @@ input:invalid
   display: flex
   .taskview
     margin: 1rem
-    flex: 1
+    flex: 3
     background-color: change-color($white, $alpha: 0.8)
     border: 0.1rem solid $white
     
@@ -308,33 +308,72 @@ input:invalid
       display: inline-block
       margin-left: 0rem
     margin-left: 2rem
-  .task
-    margin-top: 0.5rem
-    display: flex
-    align-items: center
-    .donecheckbox
-      display: inline-block
-      width: 2rem
-    .taskname
-      display: inline-flex
-      flex: 1
-      min-width: 20rem
-      margin-left: 3rem
-      display: inline-block
-      margin-left: 0rem
-      margin-right: auto
-    .taskduration
-      max-width: 3rem
-      text-align: center  
-      margin-left: 2rem
-      display: inline-block
-    .taskdue
+
+  @media only screen and (max-width: 768px)
+    .task
       .icon
-        vertical-align: middle
-        font-size: 1rem
-      width: 10rem
-      margin-left: 2rem
-      display: inline-block
+        grid-area: 2 / 1 / 3 / 2
+      display: grid
+      grid-template-columns: 2rem 8rem 8rem 2rem
+      grid-template-rows: 2rem 2rem 
+      .donecheckbox
+        display: inline-block
+        width: 2rem
+        grid-area: 1 / 1 / 2 / 2
+      .taskname
+        display: inline-flex
+        flex: 1
+        grid-area: 1 / 2 / 2 / 4
+        min-width: 10rem
+        margin-left: 3rem
+        display: inline-block
+        margin-left: 0rem
+        margin-right: auto
+      .taskduration
+        grid-area: 2 / 2 / 3 / 3
+        max-width: 3rem
+        text-align: center  
+        margin-left: 2rem
+        display: inline-block
+      .taskdue
+        grid-area: 2 / 3 / 3 / 4
+        .icon
+          vertical-align: middle
+          font-size: 1rem
+        width: 10rem
+        margin-left: 2rem
+        display: inline-block
+      .context
+        grid-area: 1 / 4 / 2 / 5
+         
+  @media only screen and (min-width: 768px)
+    .task
+      margin-top: 0.5rem
+      display: flex
+      align-items: center
+      .donecheckbox
+        display: inline-block
+        width: 2rem
+      .taskname
+        display: inline-flex
+        flex: 1
+        min-width: 10rem
+        margin-left: 3rem
+        display: inline-block
+        margin-left: 0rem
+        margin-right: auto
+      .taskduration
+        max-width: 3rem
+        text-align: center  
+        margin-left: 2rem
+        display: inline-block
+      .taskdue
+        .icon
+          vertical-align: middle
+          font-size: 1rem
+        width: 10rem
+        margin-left: 2rem
+        display: inline-block
     
 
    
