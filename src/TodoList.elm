@@ -24,7 +24,7 @@ import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
 import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
 import Html.Attributes exposing (checked, class, href, id, novalidate, required, tabindex, target, type_, value)
-import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput, onMouseEnter, onMouseLeave)
+import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput)
 import Iso8601
 import Json.Decode as D
 import Json.Encode as E
@@ -236,7 +236,7 @@ init flags =
                             , authCode = Nothing
                             , offset = flags.offset
                             , variables = flags.appVariables
-                            , showTree = True
+                            , showTree = False
                             }
                     in
                     case ( flags.authCode, flags.authTokens ) of
@@ -290,7 +290,7 @@ emptyModel variables =
     , retryCommand = Nothing
     , offset = ""
     , variables = variables
-    , showTree = True
+    , showTree = False
     }
 
 
@@ -853,11 +853,11 @@ view model =
                                        )
                             ]
                             [ div
-                                [ class "taskview", onMouseEnter (ShowTree False), onMouseLeave (ShowTree True) ]
+                                [ class "taskview" ]
                                 [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
                                 , itemView
                                 ]
-                            , div [ class "todoview", onMouseEnter (ShowTree False), onMouseLeave (ShowTree True) ] [ viewTodo model ]
+                            , div [ class "todoview" ] [ viewTodo model ]
                             ]
 
                     _ ->
@@ -1622,53 +1622,62 @@ viewHeader model =
                 _ ->
                     Auth.authStateToString model.authState
     in
-    nav [ class "ui purple inverted menu top-menu" ]
-        [ a
+    nav [ class "top-menu" ]
+        [ li
             [ class
                 (if model.notice /= ShowHelp then
                     "active item"
 
                  else
-                    "item"
+                    "item clickable"
                 )
             , onClick ClearNotices
             ]
             [ text "May" ]
-        , a
+        , li
             [ class
                 (if model.notice == ShowHelp then
-                    "active item"
+                    "active item clickable"
 
                  else
-                    "item"
+                    "item clickable"
                 )
-            , onClick ShowHelpNotice
+            , onClick
+                (if model.notice == ShowHelp then
+                    ClearNotices
+
+                 else
+                    ShowHelpNotice
+                )
             ]
             [ text "Help" ]
-        , ul [ class "right menu" ]
-            ((case model.retryCommand of
-                Just _ ->
-                    [ li [ class "item clickable", onClick SendRetry ] [ text "Retry" ] ]
+        , ul [ class "right" ]
+            (let
+                showTreeButton =
+                    li [ class "item clickable", onClick (ShowTree (not model.showTree)) ]
+                        [ text
+                            (if model.showTree then
+                                "Show Tasks"
 
-                Nothing ->
-                    []
-             )
-                ++ [ li [ class "item" ] [ text status ]
-                   , li [ class "item dropdown" ]
-                        [ text "Account"
-                        , div [ class "menu" ]
-                            (case model.authState of
-                                Auth.Authenticated _ ->
-                                    [ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
-                                    , div [ class "item", onClick Logout ] [ text "Logout" ]
-                                    ]
-
-                                _ ->
-                                    [ div [ class "item", onClick LogInConfirm ] [ text "Create Account" ]
-                                    , a [ class "item", href <| loginUrl model.variables ] [ text "Login" ]
-                                    ]
+                             else
+                                "Show Tree"
                             )
                         ]
+             in
+             (case model.retryCommand of
+                Just _ ->
+                    [ li [ class "item clickable", onClick SendRetry ] [ text "Retry" ], showTreeButton ]
+
+                Nothing ->
+                    [ showTreeButton ]
+             )
+                ++ [ case model.authState of
+                        Auth.Authenticated _ ->
+                            --[ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                            li [ class "item", onClick Logout ] [ text "Logout" ]
+
+                        _ ->
+                            a [ class "item loginbutton", href <| loginUrl model.variables ] [ text "Sign in" ]
                    ]
             )
         ]
@@ -1814,7 +1823,7 @@ viewTodoSection color title tasks =
             :: List.map
                 (\{ task, label, parent } ->
                     div [ class "todoitem" ]
-                        [ a [ onClick (SetView parent), class "clickable", tabindex 0 ] [ text <| label ++ " " ++ Task.name task ]
+                        [ span [ onClick (SetView parent), class "clickable", tabindex 0 ] [ text <| label ++ " " ++ Task.name task ]
                         ]
                 )
                 tasks
@@ -1895,7 +1904,7 @@ moveTaskModal : Id Task -> FileSystem -> Html Msg
 moveTaskModal taskId fs =
     div [ class "ui modal active" ]
         [ i [ class "icon red right floated close clickable", onClick ClearEditing ] []
-        , div [ class "header" ] [ text "Move Task" ]
+        , div [ class "header" ] [ text "Move Task to?" ]
         , div [ class "content" ]
             [ div [ class "ui list" ]
                 [ folderList (Folder.id >> MoveTask taskId) (Folder.new Id.rootId "My Tasks") Nothing fs ]
@@ -2191,7 +2200,7 @@ viewTaskList offset here time folderId fs folderView =
         labeledTasks =
             List.map (\task -> ( task, Statistics.taskLabelWithId taskLabels (Task.id task) )) filteredTasks
     in
-    viewCards (List.map (\( task, label ) -> viewTaskCard offset here time label task folderView.taskEdit) labeledTasks)
+    viewCards (List.map (\( task, label ) -> viewTaskCard offset here time label task folderView.taskEdit) (List.reverse labeledTasks))
 
 
 viewCards : List (Html Msg) -> Html Msg
@@ -2294,7 +2303,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         taskId =
             Task.id task
     in
-    div [ class "task" ]
+    div [ class <| "task " ++ labelToColor taskLabel ]
         [ checkbox
         , viewIcon <| "tasks " ++ labelToColor taskLabel
         , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
@@ -2303,7 +2312,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         , div [ class "dropdown context" ]
             [ i [ class "icon overflow" ] []
             , div [ class "menu" ]
-                [ div [ class "item", onClick (ConfirmDeleteTask taskId), tabindex 0 ] [ text "Delete" ]
+                [ div [ class "item", onClick (DeleteTask taskId), tabindex 0 ] [ text "Delete" ]
                 , div [ class "item", onClick (SelectMoveTask taskId) ] [ text "Move" ]
                 ]
             ]

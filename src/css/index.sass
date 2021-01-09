@@ -23,6 +23,9 @@ $overdue: $red
 
 $menu: $green
 
+a
+  color: $orange
+
 /* Chrome, Safari, Edge, Opera */
 input::-webkit-outer-spin-button,
 input::-webkit-inner-spin-button 
@@ -39,13 +42,12 @@ input[type=number]
 
 
 .editablefield
-  background-color: rgba(0,0,0,0)
-  color: $foreground
   border: 0px
+  background-color: rgba(0,0,0,0)
   font-size: 1rem
 .editablefield.editing
-  background-color: $foreground
-  color: $background
+  background-color: rgba(0,0,0,0)
+  text-decoration: underline
     
 @mixin serif 
   font-family: 'Bodoni Moda', serif
@@ -65,16 +67,28 @@ body
   @include sans
   margin: 0px
 
-.menu
+.top-menu
   display: flex
   margin: 0px
   align-items: center
+  padding-top: 0.5rem
+  padding-bottom: 0.5rem
   @include serif
   .item
     margin: 0.5rem
     display: inline-block
   .right
+    margin: 0px
     margin-left: auto
+  .loginbutton
+
+    text-decoration: none
+    color: $black
+    padding-top: 0.4rem
+    padding-bottom: 0.4rem
+    padding-left: 0.7rem
+    padding-right: 0.7rem
+    border-radius: 1rem
 
 .button
   background-color: $background
@@ -118,8 +132,8 @@ input:invalid
   flex-wrap: wrap
   &.hidden
     opacity: 0.1
-    transition: opacity 2s
-    transition-delay: 3s
+    transition: opacity 0.3s
+    transition-delay: 0s
   &:not(.hidden)
     opacity: 1
     transition: opacity 0.3s
@@ -127,6 +141,7 @@ input:invalid
   display: flex
   .taskview
     margin: 1rem
+    margin-top: 0rem
     flex: 3
     background-color: change-color($white, $alpha: 0.8)
     border: 0.1rem solid $white
@@ -136,7 +151,7 @@ input:invalid
     margin: 1rem
     flex: 1
     background-color: change-color($white, $alpha: 0.8)
-    margin-top: 1rem
+    margin-top: 0rem
     display: inline-block
     width: 15rem
     border: 0.1rem solid $white
@@ -144,7 +159,7 @@ input:invalid
 .modal
   position: fixed
   background-color: $white
-  padding: 3rem
+  padding: 0.5rem
   left: 50%
   top: 50%
   transform: translate(-50%, -50%)
@@ -211,11 +226,6 @@ input:invalid
 
 .editablefield
   width: unset !important
-
-
-.top-menu
-  border-radius: 0px !important
-
 
 .menu 
   padding-left: 0px
@@ -307,6 +317,12 @@ input:invalid
 .done
   color: $foreground
 
+@keyframes strike
+  0%
+    width : 0
+  100% 
+    width: 100%
+
 
 .tasks
   > .folder
@@ -346,6 +362,21 @@ input:invalid
     .context
       visibility: hidden
   .task
+    position: relative
+    &.done
+      &::after
+        content: ' '
+        position: absolute
+        top: 50%
+        left: 0
+        width: 100%
+        height: 1px
+        background: black
+        animation-name: strike
+        animation-duration: 0.3s
+        animation-timing-function: linear
+        animation-iteration-count: 1
+        animation-fill-mode: forwards
     margin-top: 0.5rem
     align-items: center
     .donecheckbox
@@ -446,3 +477,5 @@ input:invalid
 .folderlist
   .folderlist
     margin-left: 3rem
+
+
