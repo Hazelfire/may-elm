@@ -1306,12 +1306,14 @@ viewLeaf leafClass =
         lowerWidth =
             String.fromFloat 0.1
     in
-    Svg.path
-        [ SvgAttr.class [ leafClass ]
-        , SvgAttr.transform [ Svg.Scale 0.07 0.07, Svg.Rotate 180 0 0 ]
-        , SvgAttr.d <| "M 0 1 C -" ++ upperWidth ++ " 0 ,-" ++ lowerWidth ++ " 0 ,0 0 C " ++ lowerWidth ++ " 0, " ++ upperWidth ++ " 0, 0 1"
+    Svg.g [ SvgAttr.transform [ Svg.Rotate 180 0 0 ] ]
+        [ Svg.path
+            [ SvgAttr.class [ leafClass ]
+            , SvgAttr.transform [ Svg.Scale 0.07 0.07 ]
+            , SvgAttr.d <| "M 0 1 C -" ++ upperWidth ++ " 0 ,-" ++ lowerWidth ++ " 0 ,0 0 C " ++ lowerWidth ++ " 0, " ++ upperWidth ++ " 0, 0 1"
+            ]
+            []
         ]
-        []
 
 
 loginUrl : AppVariables -> String
@@ -2230,7 +2232,8 @@ labelToColor label =
 viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
     div [ class "folder" ]
-        [ div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ viewIcon <| "folder " ++ labelToColor label, text (Folder.name folder) ]
+        [ viewIcon <| "folder " ++ labelToColor label
+        , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
         , div [ class "dropdown context" ]
             [ i [ class "icon overflow" ] []
             , div [ class "menu" ]
