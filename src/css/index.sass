@@ -104,6 +104,7 @@ input:invalid
   fill: $overdue
 
 .mainview
+  flex-wrap: wrap
   &.hidden
     opacity: 0.1
     transition: opacity 2s
@@ -114,14 +115,15 @@ input:invalid
     transition-delay: 0s
   display: flex
   .taskview
-    min-width: 50rem
     margin: 1rem
     flex: 1
     background-color: change-color($white, $alpha: 0.8)
     border: 0.1rem solid $white
     
   .todoview
+    min-width: 20rem
     margin: 1rem
+    flex: 1
     background-color: change-color($white, $alpha: 0.8)
     margin-top: 1rem
     display: inline-block
@@ -152,6 +154,8 @@ input:invalid
 .context
   width: 1rem
   text-align: center
+  padding-left: 0.5rem
+  padding-right: 0.5rem
   
 .dropdown
   .icon
@@ -314,6 +318,7 @@ input:invalid
     .taskname
       display: inline-flex
       flex: 1
+      min-width: 20rem
       margin-left: 3rem
       display: inline-block
       margin-left: 0rem

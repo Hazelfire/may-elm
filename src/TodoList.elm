@@ -883,6 +883,11 @@ treeWidth =
     0.01
 
 
+treeCurve : Float
+treeCurve =
+    3
+
+
 rotatePoint : Float -> ( Float, Float ) -> ( Float, Float )
 rotatePoint angle ( x, y ) =
     ( cos angle * x - sin angle * y, sin angle * x + cos angle * y )
@@ -1238,11 +1243,6 @@ subtractPoints p1 p2 =
 setSize : Float -> ( Float, Float ) -> ( Float, Float )
 setSize size ( x, y ) =
     multiplyPoints (size * sqrt (x * x + y * y)) ( x, y )
-
-
-treeCurve : Float
-treeCurve =
-    5
 
 
 curvePointsToCurveSegments : List CurvePoint -> List CurveSegment
