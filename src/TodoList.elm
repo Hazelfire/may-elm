@@ -870,12 +870,12 @@ view model =
 
 reductionFactor : Float
 reductionFactor =
-    0.9
+    0.7
 
 
 treeHeight : Float
 treeHeight =
-    0.1
+    0.15
 
 
 treeWidth : Float
@@ -977,17 +977,109 @@ listInit list =
         [] ->
             []
 
-        item :: [] ->
+        _ :: [] ->
             []
 
         x :: rest ->
             x :: listInit rest
 
 
-branchPositions : Float -> Int -> List ( Float, Float )
+type CurveSegment
+    = Smooth ( Float, Float ) ( Float, Float )
+    | Cubic ( Float, Float ) ( Float, Float ) ( Float, Float )
+
+
+type CurvePoint
+    = SmoothPoint ( Float, Float )
+    | SharpPoint ( Float, Float )
+
+
+transformPoint : (( Float, Float ) -> ( Float, Float )) -> CurvePoint -> CurvePoint
+transformPoint func segment =
+    case segment of
+        SmoothPoint p1 ->
+            SmoothPoint (func p1)
+
+        SharpPoint p1 ->
+            SharpPoint (func p1)
+
+
+getCurvePoint : CurvePoint -> ( Float, Float )
+getCurvePoint segment =
+    case segment of
+        SmoothPoint p1 ->
+            p1
+
+        SharpPoint p1 ->
+            p1
+
+
+segmentPos : CurveSegment -> ( Float, Float )
+segmentPos segment =
+    case segment of
+        Smooth _ p1 ->
+            p1
+
+        Cubic _ _ p1 ->
+            p1
+
+
+segmentToString : CurveSegment -> String
+segmentToString segment =
+    case segment of
+        Smooth ( cx1, cy1 ) ( px1, py1 ) ->
+            String.join " "
+                [ "S"
+                , String.fromFloat cx1
+                , String.fromFloat cy1
+                , ","
+                , String.fromFloat px1
+                , String.fromFloat py1
+                ]
+
+        Cubic ( cx1, cy1 ) ( cx2, cy2 ) ( px1, py1 ) ->
+            String.join " "
+                [ "C"
+                , String.fromFloat cx1
+                , String.fromFloat cy1
+                , ","
+                , String.fromFloat cx2
+                , String.fromFloat cy2
+                , ","
+                , String.fromFloat px1
+                , String.fromFloat py1
+                ]
+
+
+midpointPoints : CurvePoint -> CurvePoint -> CurvePoint
+midpointPoints s1 s2 =
+    case s1 of
+        SmoothPoint p1 ->
+            transformPoint (\p2 -> midpoint p1 p2) s2
+
+        SharpPoint p1 ->
+            transformPoint (\p2 -> midpoint p1 p2) s2
+
+
+mapEndControlPoint : (( Float, Float ) -> ( Float, Float )) -> CurveSegment -> CurveSegment
+mapEndControlPoint func s2 =
+    case s2 of
+        Cubic cc1 cc2 p1 ->
+            Cubic cc1 (func cc2) p1
+
+        Smooth sc1 p2 ->
+            Smooth (func sc1) p2
+
+
+midpoint : ( Float, Float ) -> ( Float, Float ) -> ( Float, Float )
+midpoint ( x1, y1 ) ( x2, y2 ) =
+    ( (x1 + x2) / 2, (y1 + y2) / 2 )
+
+
+branchPositions : Float -> Int -> List CurvePoint
 branchPositions width index =
     if index == 0 then
-        [ ( -width, 0 ), ( 0, -treeHeight ), ( width, 0 ) ]
+        [ SmoothPoint ( -width, 0 ), SharpPoint ( 0, -treeHeight ), SmoothPoint ( width, 0 ) ]
 
     else
         let
@@ -1012,18 +1104,18 @@ branchPositions width index =
                     0
 
             lefts =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint rightAngle) (branchPositions width (index // 2))
+                List.map (transformPoint <| (\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint rightAngle) (branchPositions width (index // 2))
 
             rights =
-                List.map ((\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint leftAngle) (branchPositions width ((index - 1) // 2))
+                List.map (transformPoint <| (\( x, y ) -> ( reductionFactor * x, reductionFactor * y - treeHeight )) << rotatePoint leftAngle) (branchPositions width ((index - 1) // 2))
         in
         case ( last rights, lefts ) of
-            ( Just ( x1, y1 ), ( x2, y2 ) :: restLefts ) ->
+            ( Just rightPoint, leftPoint :: restLefts ) ->
                 let
-                    midpoint =
-                        ( (x1 + x2) / 2, (y1 + y2) / 2 )
+                    midCurvePoint =
+                        midpointPoints rightPoint leftPoint
                 in
-                (( -width, 0 ) :: (listInit rights ++ (midpoint :: restLefts))) ++ [ ( width, 0 ) ]
+                (SmoothPoint ( -width, 0 ) :: (listInit rights ++ (midCurvePoint :: restLefts))) ++ [ SmoothPoint ( width, 0 ) ]
 
             _ ->
                 -- Not Possible
@@ -1128,10 +1220,65 @@ viewBackground here now model =
         ]
 
 
-constructTreePath : List ( Float, Float ) -> Svg.Svg Msg
+addPoints : ( Float, Float ) -> ( Float, Float ) -> ( Float, Float )
+addPoints ( x1, y1 ) ( x2, y2 ) =
+    ( x1 + x2, y1 + y2 )
+
+
+multiplyPoints : Float -> ( Float, Float ) -> ( Float, Float )
+multiplyPoints s ( x, y ) =
+    ( s * x, s * y )
+
+
+subtractPoints : ( Float, Float ) -> ( Float, Float ) -> ( Float, Float )
+subtractPoints p1 p2 =
+    addPoints p1 (multiplyPoints -1 p2)
+
+
+setSize : Float -> ( Float, Float ) -> ( Float, Float )
+setSize size ( x, y ) =
+    multiplyPoints (size * sqrt (x * x + y * y)) ( x, y )
+
+
+treeCurve : Float
+treeCurve =
+    5
+
+
+curvePointsToCurveSegments : List CurvePoint -> List CurveSegment
+curvePointsToCurveSegments points =
+    case points of
+        p1 :: (SmoothPoint p2) :: p3 :: rest ->
+            let
+                firstControl =
+                    midpoint (getCurvePoint p1) (addPoints p2 (subtractPoints p2 (getCurvePoint p3)))
+
+                vector =
+                    setSize treeCurve (subtractPoints firstControl p2)
+            in
+            Smooth (addPoints vector p2) p2 :: curvePointsToCurveSegments (SmoothPoint p2 :: p3 :: rest)
+
+        p1 :: (SharpPoint p2) :: p3 :: rest ->
+            Smooth p2 p2 :: curvePointsToCurveSegments (SharpPoint p2 :: p3 :: rest)
+
+        [] ->
+            []
+
+        _ :: [] ->
+            []
+
+        _ :: p2 :: [] ->
+            [ Smooth (getCurvePoint p2) (getCurvePoint p2) ]
+
+
+constructTreePath : List CurvePoint -> Svg.Svg Msg
 constructTreePath points =
     case points of
-        ( x, y ) :: tail ->
+        firstPoint :: _ ->
+            let
+                ( x, y ) =
+                    getCurvePoint firstPoint
+            in
             Svg.path
                 [ SvgAttr.class [ "tree" ]
                 , SvgAttr.d <|
@@ -1140,7 +1287,7 @@ constructTreePath points =
                          , String.fromFloat x
                          , String.fromFloat y
                          ]
-                            ++ List.map (\( x2, y2 ) -> String.join " " [ "L", String.fromFloat x2, String.fromFloat y2 ]) tail
+                            ++ List.map segmentToString (curvePointsToCurveSegments points)
                         )
                 ]
                 []
@@ -1161,7 +1308,7 @@ viewLeaf leafClass =
     in
     Svg.path
         [ SvgAttr.class [ leafClass ]
-        , SvgAttr.transform [ Svg.Scale 0.1 0.1, Svg.Rotate 180 0 0 ]
+        , SvgAttr.transform [ Svg.Scale 0.07 0.07, Svg.Rotate 180 0 0 ]
         , SvgAttr.d <| "M 0 1 C -" ++ upperWidth ++ " 0 ,-" ++ lowerWidth ++ " 0 ,0 0 C " ++ lowerWidth ++ " 0, " ++ upperWidth ++ " 0, 0 1"
         ]
         []
