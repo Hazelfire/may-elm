@@ -69,7 +69,7 @@ body
   display: flex
   margin: 0px
   align-items: center
-  background-color: $menu
+  @include serif
   .item
     margin: 0.5rem
     display: inline-block
@@ -144,13 +144,11 @@ input:invalid
 .modal
   position: fixed
   background-color: $white
-  bottom: 0
-  top: 0
-  left: 0
-  right: 0
-  margin: 5% auto
+  padding: 3rem
+  left: 50%
+  top: 50%
+  transform: translate(-50%, -50%)
   max-width: 80%
-  border-radius: 0.5rem
 
 
 .screenmask
