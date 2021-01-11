@@ -93,8 +93,13 @@ type alias FolderView =
     , editing : FolderEditing
     , viewOld : Bool
     , taskEdit : Maybe TaskView
-    , currentlyDragging : Maybe (Id Task)
+    , currentlyDragging : Maybe ItemId
     }
+
+
+type ItemId
+    = FolderId (Id Folder)
+    | TaskId (Id Task)
 
 
 type alias TaskView =
@@ -173,7 +178,7 @@ type Msg
     | DeleteData
     | ShareFolder (Id Folder) Bool
     | ShowTree Bool
-    | StartDrag (Id Task)
+    | StartDrag ItemId
     | EndDrag
     | DropMoveTask (Id Folder)
     | NoOp
@@ -686,8 +691,8 @@ update message model =
         ShowTree state ->
             pure { model | showTree = state }
 
-        StartDrag taskId ->
-            pure <| mapViewing (mapFolderView (\folderView -> { folderView | currentlyDragging = Just taskId })) model
+        StartDrag itemId ->
+            pure <| mapViewing (mapFolderView (\folderView -> { folderView | currentlyDragging = Just itemId })) model
 
         EndDrag ->
             pure <| mapViewing (mapFolderView (\folderView -> { folderView | currentlyDragging = Nothing })) model
@@ -696,10 +701,19 @@ update message model =
             case model.viewing of
                 ViewTypeFolder folderView ->
                     case folderView.currentlyDragging of
-                        Just taskId ->
+                        Just itemId ->
                             let
                                 fsUpdate =
-                                    mapFileSystem (FileSystem.moveTask taskId folderId) model
+                                    case itemId of
+                                        FolderId childId ->
+                                            if childId == folderId then
+                                                model
+
+                                            else
+                                                mapFileSystem (FileSystem.moveFolder childId folderId) model
+
+                                        TaskId taskId ->
+                                            mapFileSystem (FileSystem.moveTask taskId folderId) model
                             in
                             saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\fv -> { fv | taskEdit = Nothing })) fsUpdate
 
@@ -1823,7 +1837,7 @@ labelToColor label =
 
 viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
-    div [ class "folder", onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)) ]
+    div [ class "folder", onDragStart (StartDrag (FolderId (Folder.id folder))), onDragOver EndDrag, onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)), draggable "true" ]
         [ viewIcon <| "folder " ++ labelToColor label
         , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
         , div [ class "dropdown context" ]
@@ -1910,7 +1924,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         taskId =
             Task.id task
     in
-    div [ class <| "task " ++ labelToColor taskLabel, draggable "true", onDragStart (StartDrag taskId), onDragEnd EndDrag ]
+    div [ class <| "task " ++ labelToColor taskLabel, draggable "true", onDragStart (StartDrag (TaskId taskId)), onDragEnd EndDrag ]
         [ checkbox
         , viewIcon <| "tasks " ++ labelToColor taskLabel
         , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
