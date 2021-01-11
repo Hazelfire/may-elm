@@ -1840,13 +1840,7 @@ viewFolderCard label folder =
     div [ class "folder", onDragStart (StartDrag (FolderId (Folder.id folder))), onDragOver EndDrag, onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)), draggable "true" ]
         [ viewIcon <| "folder " ++ labelToColor label
         , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
-        , div [ class "dropdown context" ]
-            [ i [ class "icon overflow" ] []
-            , div [ class "menu" ]
-                [ div [ class "item", onClick (ConfirmDeleteFolder (Folder.id folder)) ] [ text "Delete" ]
-                , div [ class "item", onClick (SelectMoveFolder (Folder.id folder)) ] [ text "Move" ]
-                ]
-            ]
+        , div [ class "icon cross delete clickable", onClick (ConfirmDeleteFolder (Folder.id folder)) ] []
         ]
 
 
@@ -1930,13 +1924,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
         , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
-        , div [ class "dropdown context" ]
-            [ i [ class "icon overflow" ] []
-            , div [ class "menu" ]
-                [ div [ class "item", onClick (DeleteTask taskId), tabindex 0 ] [ text "Delete" ]
-                , div [ class "item", onClick (SelectMoveTask taskId) ] [ text "Move" ]
-                ]
-            ]
+        , div [ class "delete icon cross clickable", onClick (DeleteTask taskId) ] []
         ]
 
 
