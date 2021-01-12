@@ -1840,7 +1840,7 @@ viewFolderCard label folder =
     div [ class "folder", onDragStart (StartDrag (FolderId (Folder.id folder))), onDragOver EndDrag, onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)), draggable "true" ]
         [ viewIcon <| "folder " ++ labelToColor label
         , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
-        , div [ class "icon cross delete clickable", onClick (ConfirmDeleteFolder (Folder.id folder)) ] []
+        , div [ class "icon trash delete clickable", onClick (ConfirmDeleteFolder (Folder.id folder)) ] []
         ]
 
 
@@ -1924,7 +1924,7 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
         , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
-        , div [ class "delete icon cross clickable", onClick (DeleteTask taskId) ] []
+        , div [ class "delete icon trash clickable", onClick (DeleteTask taskId) ] []
         ]
 
 
