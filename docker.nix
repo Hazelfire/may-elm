@@ -15,6 +15,7 @@ pkgs.dockerTools.buildImage {
       nodejs
       bash
       cacert
+      pkg-config
       yarn 
       elmPackages.elm
       elmPackages.elm-format

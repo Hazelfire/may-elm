@@ -5,3 +5,4 @@ dist
 elm-stuff
 coverage/
 src/config.js
+docker
