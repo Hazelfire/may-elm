@@ -23,7 +23,7 @@ import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
 import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, draggable, href, id, novalidate, required, tabindex, target, type_, value)
+import Html.Attributes exposing (checked, class, draggable, href, id, novalidate, required, size, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput, preventDefaultOn)
 import Iso8601
 import Json.Decode as D
@@ -1716,32 +1716,35 @@ editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg
 
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
 editableField editing elementId name currentlyEditingMsg workingMsg setValue =
-    input
-        [ id
-            (if editing then
-                elementId
+    span [ class "autoexpand" ]
+        [ span [ class "autoexpandwidth" ] [ text name ]
+        , input
+            [ id
+                (if editing then
+                    elementId
 
-             else
-                ""
-            )
-        , onBlur (setValue name)
-        , onEnter (setValue name)
-        , onInput workingMsg
-        , onClick currentlyEditingMsg
-        , class <|
-            "clickable editablefield "
-                ++ elementId
-                ++ (if editing then
-                        " editing"
+                 else
+                    ""
+                )
+            , onBlur (setValue name)
+            , onEnter (setValue name)
+            , onInput workingMsg
+            , size (String.length name)
+            , onClick currentlyEditingMsg
+            , class <|
+                "clickable editablefield "
+                    ++ (if editing then
+                            " editing"
 
-                    else
-                        ""
-                   )
-        , tabindex 0
-        , onFocus currentlyEditingMsg
-        , value name
+                        else
+                            ""
+                       )
+            , tabindex 0
+            , onFocus currentlyEditingMsg
+            , value name
+            ]
+            []
         ]
-        []
 
 
 viewBreadcrumbSections : FileSystem -> Id Folder -> List (Html Msg)
@@ -1921,7 +1924,9 @@ viewTaskCard offset zone now taskLabel task taskViewM =
     div [ class <| "task " ++ labelToColor taskLabel, draggable "true", onDragStart (StartDrag (TaskId taskId)), onDragEnd EndDrag ]
         [ checkbox
         , viewIcon <| "tasks " ++ labelToColor taskLabel
-        , editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
+        , div [ class "taskname" ]
+            [ editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
+            ]
         , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
         , viewDueField offset zone task
         , div [ class "delete icon trash clickable", onClick (DeleteTask taskId) ] []

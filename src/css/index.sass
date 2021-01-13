@@ -90,6 +90,7 @@ body
     padding-right: 0.7rem
     border-radius: 1rem
 
+
 .button
   background-color: $background
   border: 0rem
@@ -317,12 +318,6 @@ input:invalid
 .done
   color: $foreground
 
-@keyframes strike
-  0%
-    width : 0
-  100% 
-    width: 100%
-
 
 .tasks
   > .folder
@@ -361,23 +356,24 @@ input:invalid
         visibility: visible
     .context
       visibility: hidden
+
   .task
-    &.done
+    margin-top: 0.5rem
+    align-items: center
+    .taskname .autoexpand
       &::after
         content: ' '
         position: absolute
-        top: 50%
-        left: 0
-        width: 100%
+        top: 60%
+        left: 0.1rem
         height: 1px
+        width: 0%
         background: black
-        animation-name: strike
-        animation-duration: 0.3s
-        animation-timing-function: linear
-        animation-iteration-count: 1
-        animation-fill-mode: forwards
-    margin-top: 0.5rem
-    align-items: center
+        transition: width 0.1s
+    &.done
+      .taskname .autoexpand::after
+        width: 100%
+      
     .donecheckbox
       display: inline-block
       width: 2rem
@@ -415,7 +411,7 @@ input:invalid
       .taskdue
         margin-left: 0px
         grid-area: 2 / 4 / 3 / 5
-      .context
+      .delete
         grid-area: 1 / 5 / 2 / 6
          
   @media only screen and (min-width: 700px)
@@ -484,4 +480,14 @@ input:invalid
   .folderlist
     margin-left: 3rem
 
+
+.autoexpand
+  position: relative
+  .autoexpandwidth
+    visibility: hidden
+  input
+    position: absolute
+    width: 100%
+    left: 0
+  
 
