@@ -11,6 +11,7 @@ pkgs.dockerTools.buildImage {
     tag = "latest";                    
     # provide a tag                         
     contents = (with pkgs; [  
+      pixman
       busybox
       nodejs
       bash
