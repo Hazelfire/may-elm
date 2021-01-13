@@ -1684,34 +1684,37 @@ onEnter message =
 
 editableNumberField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
 editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg setValue =
-    input
-        [ id
-            (if editing then
-                elementId
+    span [ class "autoexpand" ]
+        [ span [ class "autoexpandwidth" ] [ text numberValue ]
+        , input
+            [ id
+                (if editing then
+                    elementId
 
-             else
-                ""
-            )
-        , onBlur (setValue numberValue)
-        , onEnter (setValue numberValue)
-        , novalidate True
-        , onInput workingMsg
-        , onClick currentlyEditingMsg
-        , class <|
-            "clickable editablefield "
-                ++ elementId
-                ++ (if editing then
-                        " editing"
+                 else
+                    ""
+                )
+            , onBlur (setValue numberValue)
+            , onEnter (setValue numberValue)
+            , novalidate True
+            , onInput workingMsg
+            , onClick currentlyEditingMsg
+            , class <|
+                "clickable editablefield "
+                    ++ elementId
+                    ++ (if editing then
+                            " editing"
 
-                    else
-                        ""
-                   )
-        , tabindex 0
-        , onFocus currentlyEditingMsg
-        , value numberValue
-        , type_ "number"
+                        else
+                            ""
+                       )
+            , tabindex 0
+            , onFocus currentlyEditingMsg
+            , value numberValue
+            , type_ "number"
+            ]
+            []
         ]
-        []
 
 
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
@@ -1918,6 +1921,9 @@ viewTaskCard offset zone now taskLabel task taskViewM =
                     _ ->
                         Nothing
 
+        noDuration =
+            Task.duration task == 0 && not editingDuration
+
         taskId =
             Task.id task
     in
@@ -1927,7 +1933,16 @@ viewTaskCard offset zone now taskLabel task taskViewM =
         , div [ class "taskname" ]
             [ editableField editingName "taskname" nameText (StartEditingTaskName taskId nameText) ChangeTaskName (restrictMessage (\x -> String.length x > 0) (SetTaskName taskId))
             ]
-        , editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
+        , div [ class "taskduration" ]
+            [ if noDuration then
+                span [ onClick (StartEditingTaskDuration taskId durationText) ] [ text "No Duration" ]
+
+              else
+                span []
+                    [ editableNumberField editingDuration "taskduration" durationText (StartEditingTaskDuration taskId durationText) (ChangeTaskDuration taskId) (parseFloatMessage (SetTaskDuration taskId))
+                    , text " hours"
+                    ]
+            ]
         , viewDueField offset zone task
         , div [ class "delete icon trash clickable", onClick (DeleteTask taskId) ] []
         ]
@@ -1944,5 +1959,5 @@ viewDueField offset zone task =
 
         Nothing ->
             div [ class "taskdue" ]
-                [ span [ class "clickable noinfo", onClick (SetTaskDueNow <| Task.id task) ] [ text "No Due Date" ]
+                [ span [ class "clickable", onClick (SetTaskDueNow <| Task.id task) ] [ text "No Due Date" ]
                 ]
