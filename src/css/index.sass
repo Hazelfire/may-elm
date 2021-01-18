@@ -97,6 +97,8 @@ body
   color: $foreground
   border-radius: 0.3rem
   cursor: pointer
+  &:hover
+    background-color: change-color($background, $lightness: 70%)
    
 .background
   position: fixed 
@@ -141,6 +143,7 @@ input:invalid
     transition-delay: 0s
   display: flex
   .taskview
+    padding: 0.5rem
     margin: 1rem
     margin-top: 0rem
     flex: 3
@@ -340,7 +343,7 @@ input:invalid
   .taskname
     min-width: 10rem
     display: inline-block
-    margin-left: 0rem
+    margin-left: 0.5rem
     margin-right: auto
   .taskduration
     display: inline-block
@@ -380,6 +383,7 @@ input:invalid
   margin-top: 0.5rem
   .foldername
     display: inline-block
+    margin-left: 0.5rem
     margin-right: auto
   .icon
     vertical-align: middle
@@ -403,14 +407,15 @@ input:invalid
     .delete
       grid-area: 1 / 4 / 2 / 5
 
-.addfolder
-  @include folder
+.button.addtask
+  margin-top: 0.5rem
+  border-radius: 0.3rem 0px 0px 0.3rem
 
-.addtask
-  @include task
-  @media only screen and (min-width: 700px)
-    display: flex
-    margin-left: 2rem
+  
+
+.button.addfolder
+  margin-top: 0.5rem
+  border-radius: 0rem 0.3rem 0.3rem 0rem
   
 
 .tasks

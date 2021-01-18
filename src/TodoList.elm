@@ -1623,17 +1623,9 @@ viewFolderDetails offset here time folderView fs =
                        --     [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
                        , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
                        , viewFolderList here time folderId fs
-                       , div [ class "addfolder clickable", onClick (CreateFolder folderId) ]
-                            [ viewIcon <| "plus"
-                            , div [ class "addfolderlabel" ] [ text "Add Folder" ]
-                            ]
                        , viewTaskList offset here time folderId fs folderView
-                       , div [ class <| "addtask clickable", onClick (CreateTask folderId) ]
-                            [ viewIcon <| "plus"
-                            , div [ class "addtasklabel clickable" ]
-                                [ text "Add Task"
-                                ]
-                            ]
+                       , viewButton "addtask right floated primary" "Add Task" (CreateTask folderId)
+                       , viewButton "addfolder right floated primary" "Add Folder" (CreateFolder folderId)
                        ]
                 )
 
