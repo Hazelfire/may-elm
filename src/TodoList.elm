@@ -1616,7 +1616,6 @@ viewFolderDetails offset here time folderView fs =
                                     [ div [ class "breadcrumb" ] [ div [ class "" ] (viewBreadcrumbSections fs folderId) ]
                                     , editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
                                     ]
-                                , viewButton "deletebutton" "Delete" (ConfirmDeleteFolder folderId)
                                 ]
                             )
 
