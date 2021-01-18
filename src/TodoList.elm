@@ -1533,7 +1533,7 @@ folderList cmd folder excluding fs =
                 |> List.map (\child -> folderList cmd child excluding fs)
     in
     div [ class "item" ]
-        [ viewIcon "folder"
+        [ viewIcon "foldericon"
         , span [ class "clickable", onClick (cmd folder) ] [ text <| Folder.name folder ]
         , div [ class "folderlist" ] childrenElements
         ]
@@ -1623,9 +1623,17 @@ viewFolderDetails offset here time folderView fs =
                        --     [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
                        , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
                        , viewFolderList here time folderId fs
+                       , div [ class "addfolder clickable", onClick (CreateFolder folderId) ]
+                            [ viewIcon <| "plus"
+                            , div [ class "addfolderlabel" ] [ text "Add Folder" ]
+                            ]
                        , viewTaskList offset here time folderId fs folderView
-                       , viewButton "right floated primary" "Add Task" (CreateTask folderId)
-                       , viewButton "right floated primary" "Add Folder" (CreateFolder folderId)
+                       , div [ class <| "addtask clickable", onClick (CreateTask folderId) ]
+                            [ viewIcon <| "plus"
+                            , div [ class "addtasklabel clickable" ]
+                                [ text "Add Task"
+                                ]
+                            ]
                        ]
                 )
 
@@ -1778,7 +1786,7 @@ viewFolderList here time folderId fs =
             Statistics.labelTasks here time (FileSystem.allTasks fs)
 
         labeledFolders =
-            List.map (\folder -> ( folder, Statistics.folderLabelWithId taskLabels (Folder.id folder) fs )) childrenFolders
+            List.reverse <| List.map (\folder -> ( folder, Statistics.folderLabelWithId taskLabels (Folder.id folder) fs )) childrenFolders
     in
     viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
 
@@ -1843,7 +1851,7 @@ labelToColor label =
 viewFolderCard : Statistics.Label -> Folder -> Html Msg
 viewFolderCard label folder =
     div [ class "folder", onDragStart (StartDrag (FolderId (Folder.id folder))), onDragOver EndDrag, onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)), draggable "true" ]
-        [ viewIcon <| "folder " ++ labelToColor label
+        [ viewIcon <| "foldericon " ++ labelToColor label
         , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
         , div [ class "icon trash delete clickable", onClick (ConfirmDeleteFolder (Folder.id folder)) ] []
         ]
