@@ -39,6 +39,7 @@ import May.SyncList as SyncList exposing (SyncList)
 import May.Task as Task exposing (Task)
 import Random
 import Scale
+import String
 import Task
 import Time
 import TypedSvg as Svg
@@ -1716,10 +1717,24 @@ editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg
         ]
 
 
+escapeString : String -> String
+escapeString text =
+    String.replace " " "&nbsp;" text
+
+
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
 editableField editing elementId name currentlyEditingMsg workingMsg setValue =
     span [ class "autoexpand" ]
-        [ span [ class "autoexpandwidth" ] [ text name ]
+        [ span [ class "autoexpandwidth" ]
+            [ text
+                << escapeString
+              <|
+                if name == "" then
+                    " "
+
+                else
+                    name
+            ]
         , input
             [ id
                 (if editing then
