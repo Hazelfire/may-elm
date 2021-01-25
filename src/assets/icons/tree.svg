@@ -7,14 +7,14 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   viewBox="0 0 3.1842976 3.4622054"
+   viewBox="0 0 1592.1488 1731.1027"
    class="background"
    version="1.1"
    id="svg110"
    sodipodi:docname="tree.svg"
    inkscape:version="1.0.1 (3bc2e813f5, 2020-09-07)"
-   width="3.1842976"
-   height="3.4622054">
+   width="1592.1488"
+   height="1731.1027">
   <style
      id="style118">
 .dotodayleaf { 
@@ -50,18 +50,19 @@
      inkscape:pageopacity="0"
      inkscape:pageshadow="2"
      inkscape:window-width="1342"
-     inkscape:window-height="709"
+     inkscape:window-height="725"
      id="namedview112"
      showgrid="false"
-     inkscape:zoom="59.71666"
-     inkscape:cx="0.88937572"
-     inkscape:cy="0.96215821"
+     inkscape:zoom="0.2176591"
+     inkscape:cx="795.36324"
+     inkscape:cy="865.80822"
      inkscape:window-x="10"
-     inkscape:window-y="28"
+     inkscape:window-y="10"
      inkscape:window-maximized="0"
-     inkscape:current-layer="svg110" />
+     inkscape:current-layer="svg110"
+     inkscape:document-rotation="0" />
   <g
-     transform="matrix(6.8654059,0,0,6.8654059,1.823254,3.4622053)"
+     transform="matrix(3432.7029,0,0,3432.7029,911.62696,1731.1026)"
      id="g108"
      class="tree  dosoonleaf  dolaterleaf  overdueleaf  dotodayleaf">
     <path
