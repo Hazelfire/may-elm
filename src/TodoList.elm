@@ -117,8 +117,7 @@ type FolderEditing
 
 
 type TaskEditing
-    = NotEditingTask
-    | EditingTaskName String
+    = EditingTaskName String
     | EditingTaskDuration String
     | ConfirmingDeleteTask
     | MovingTask
@@ -364,12 +363,35 @@ update message model =
             pure <| { model | viewing = newFolderView fid }
 
         StartEditingFolderName name ->
-            withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName name)))) model
+            let
+                startSelect =
+                    withCommand (always (setFocus "foldername")) <| mapViewing (mapFolderView (mapFolderEditing (always (EditingFolderName name)))) model
+            in
+            case model.viewing of
+                ViewTypeFolder folderView ->
+                    case folderView.editing of
+                        EditingFolderName _ ->
+                            pure model
+
+                        _ ->
+                            startSelect
+
+                _ ->
+                    startSelect
 
         StartEditingTaskName id name ->
             case model.viewing of
                 ViewTypeFolder folderView ->
-                    ( { model | viewing = ViewTypeFolder { folderView | taskEdit = Just { id = id, editing = EditingTaskName name } } }, setFocus "taskname" )
+                    let
+                        startSelect =
+                            ( { model | viewing = ViewTypeFolder { folderView | taskEdit = Just { id = id, editing = EditingTaskName name } } }, setFocus "taskname" )
+                    in
+                    case folderView.taskEdit of
+                        Just _ ->
+                            pure model
+
+                        _ ->
+                            startSelect
 
                 _ ->
                     pure model
@@ -395,7 +417,7 @@ update message model =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.rename name)) model
 
                 ( newModel, command ) =
-                    saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+                    saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\folderView -> { folderView | taskEdit = Nothing })) fsChange
             in
             ( newModel, Cmd.batch [ command, setBlur "taskname" ] )
 
@@ -414,7 +436,7 @@ update message model =
                     mapFileSystem (FileSystem.mapOnTask tid (Task.setDuration duration)) model
 
                 ( newModel, command ) =
-                    saveToLocalStorageAndUpdate <| mapViewing (mapTaskView (mapTaskEditing (always NotEditingTask))) fsChange
+                    saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\folderView -> { folderView | taskEdit = Nothing })) fsChange
             in
             ( newModel, Cmd.batch [ command, setBlur "taskduration" ] )
 
