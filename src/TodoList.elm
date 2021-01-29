@@ -1741,7 +1741,7 @@ editableNumberField editing elementId numberValue currentlyEditingMsg workingMsg
 
 escapeString : String -> String
 escapeString text =
-    String.replace " " "&nbsp;" text
+    String.replace " " "\u{00A0}" text
 
 
 editableField : Bool -> String -> String -> Msg -> (String -> Msg) -> (String -> Msg) -> Html Msg
