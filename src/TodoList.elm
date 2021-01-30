@@ -23,7 +23,7 @@ import Graphql.Http
 import Graphql.Operation as Graphql
 import Graphql.SelectionSet as Graphql
 import Html exposing (Attribute, Html, a, button, code, div, h3, h5, i, input, label, li, nav, p, span, text, ul)
-import Html.Attributes exposing (checked, class, draggable, href, id, novalidate, required, size, tabindex, target, type_, value)
+import Html.Attributes exposing (checked, class, draggable, href, id, novalidate, required, style, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, on, onBlur, onClick, onFocus, onInput, preventDefaultOn)
 import Iso8601
 import Json.Decode as D
@@ -922,7 +922,8 @@ view model =
                             ]
                             [ div
                                 [ class "taskview" ]
-                                [ viewStatistics model.currentZone model.currentTime (FileSystem.allTasks model.fs)
+                                [ viewStatistics here now (FileSystem.allTasks model.fs)
+                                , viewProgressBar here now (FileSystem.allTasks model.fs)
                                 , itemView
                                 ]
                             , div [ class "todoview" ] [ viewTodo model ]
@@ -1441,18 +1442,13 @@ tomorrow time =
     Time.millisToPosix (Time.posixToMillis time + 60 * 60 * 1000 * 24)
 
 
-viewStatistics : Maybe Time.Zone -> Maybe Time.Posix -> List Task -> Html Msg
-viewStatistics hereM nowM tasks =
-    case ( hereM, nowM ) of
-        ( Just here, Just now ) ->
-            div [ class "ui statistics" ]
-                [ viewStatistic ViewUrgency "Done today" (showHours <| List.sum (List.map Task.duration (Statistics.doneToday here now tasks)))
-                , viewStatistic ViewUrgency "Urgency" <| (showHours <| Statistics.urgency here now tasks)
-                , viewStatistic ViewUrgency "Tomorrow" (showHours <| Statistics.urgency here (tomorrow now) tasks)
-                ]
-
-        _ ->
-            div [] [ text "Loading" ]
+viewStatistics : Time.Zone -> Time.Posix -> List Task -> Html Msg
+viewStatistics here now tasks =
+    div [ class "ui statistics" ]
+        [ viewStatistic ViewUrgency "Done today" (showHours <| List.sum (List.map Task.duration (Statistics.doneToday here now tasks)))
+        , viewStatistic ViewUrgency "Urgency" <| (showHours <| Statistics.urgency here now tasks)
+        , viewStatistic ViewUrgency "Tomorrow" (showHours <| Statistics.urgency here (tomorrow now) tasks)
+        ]
 
 
 viewStatistic : msg -> String -> String -> Html msg
@@ -1461,6 +1457,37 @@ viewStatistic msg label value =
         [ div [ class "value" ] [ text value ]
         , div [ class "label" ] [ text label ]
         ]
+
+
+viewProgressBar : Time.Zone -> Time.Posix -> List Task -> Html Msg
+viewProgressBar here now ts =
+    let
+        tasks =
+            Statistics.labelTasks here now ts
+
+        todo =
+            tasks.doneToday ++ tasks.overdue ++ List.map Tuple.first tasks.doToday
+
+        urgency =
+            List.sum (List.map (.task >> Task.duration) todo)
+
+        createSegments label =
+            List.map
+                (\task ->
+                    div
+                        [ style "width" (String.fromFloat (Task.duration task.task / urgency * 99.9) ++ "%")
+                        , class <| "progressbarsegment " ++ labelToColor label
+                        ]
+                        []
+                )
+    in
+    div [ class "progressbar" ]
+        (List.concat
+            [ createSegments Statistics.DoneToday tasks.doneToday
+            , createSegments Statistics.Overdue tasks.overdue
+            , createSegments Statistics.DoToday (List.map Tuple.first tasks.doToday)
+            ]
+        )
 
 
 viewButton : String -> String -> msg -> Html msg
@@ -1736,7 +1763,6 @@ editableField editing elementId name currentlyEditingMsg workingMsg setValue =
             , onBlur (setValue name)
             , onEnter (setValue name)
             , onInput workingMsg
-            , size (String.length name)
             , onClick currentlyEditingMsg
             , class <|
                 "clickable editablefield "

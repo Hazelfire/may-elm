@@ -506,4 +506,18 @@ input:invalid
     width: 100%
     left: 0
   
+.progressbar
+  .progressbarsegment
+    display: inline-block
+    color: rgba(0,0,0,0)
+    height: 1rem
+    margin-left: -0.1rem
+    border-left: 0.1rem solid $background
+  .progressbarsegment.done
+    background-color: $foreground
+  .progressbarsegment.overdue
+    background-color: $overdue
+  .progressbarsegment.dotoday
+    background-color: $dotoday
 
+    display: inline-block
