@@ -397,7 +397,7 @@ labelTasks here now tasks =
             endOfDay here now
 
         isDueToday { start } =
-            Time.posixToMillis start <= Time.posixToMillis eod
+            Time.posixToMillis start < Time.posixToMillis eod
 
         ( doToday, doAfterToday ) =
             List.partition isDueToday upcoming
