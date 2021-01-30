@@ -95,6 +95,7 @@ type alias FolderView =
     , viewOld : Bool
     , taskEdit : Maybe TaskView
     , currentlyDragging : Maybe ItemId
+    , draggingOver : Maybe (Id Folder)
     }
 
 
@@ -125,7 +126,7 @@ type TaskEditing
 
 newFolderView : Id Folder -> ViewType
 newFolderView id =
-    ViewTypeFolder { id = id, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False, currentlyDragging = Nothing }
+    ViewTypeFolder { id = id, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False, currentlyDragging = Nothing, draggingOver = Nothing }
 
 
 type Msg
@@ -181,6 +182,7 @@ type Msg
     | StartDrag ItemId
     | EndDrag
     | DropMoveTask (Id Folder)
+    | SetDraggingOver (Maybe (Id Folder))
     | NoOp
 
 
@@ -236,7 +238,7 @@ init flags =
                     let
                         initModel =
                             { fs = fs
-                            , viewing = ViewTypeFolder { id = FileSystem.getRootId fs, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False, currentlyDragging = Nothing }
+                            , viewing = newFolderView (FileSystem.getRootId fs)
                             , currentTime = Nothing
                             , authState = Auth.Unauthenticated
                             , syncStatus = SyncOffline
@@ -290,7 +292,7 @@ init flags =
 emptyModel : AppVariables -> Model
 emptyModel variables =
     { fs = FileSystem.new (Folder.new Id.rootId "My Tasks")
-    , viewing = ViewTypeFolder { id = Id.rootId, editing = NotEditingFolder, taskEdit = Nothing, viewOld = False, currentlyDragging = Nothing }
+    , viewing = newFolderView Id.rootId
     , currentTime = Nothing
     , authState = Auth.Unauthenticated
     , syncStatus = SyncOffline
@@ -738,13 +740,16 @@ update message model =
                                         TaskId taskId ->
                                             mapFileSystem (FileSystem.moveTask taskId folderId) model
                             in
-                            saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\fv -> { fv | taskEdit = Nothing })) fsUpdate
+                            saveToLocalStorageAndUpdate <| mapViewing (mapFolderView (\fv -> { fv | taskEdit = Nothing, currentlyDragging = Nothing, draggingOver = Nothing })) fsUpdate
 
                         _ ->
                             pure model
 
                 _ ->
                     pure model
+
+        SetDraggingOver dragId ->
+            pure <| mapViewing (mapFolderView (\folderView -> { folderView | draggingOver = dragId })) model
 
         NoOp ->
             pure model
@@ -1631,7 +1636,7 @@ viewFolderDetails offset here time folderView fs =
 
                              else
                                 [ li [ class "item header-name" ]
-                                    [ div [ class "breadcrumb" ] [ div [ class "" ] (viewBreadcrumbSections fs folderId) ]
+                                    [ div [ class "breadcrumb" ] [ div [ class "" ] (viewBreadcrumbSections folderView.draggingOver fs folderId) ]
                                     , editableField editingName "foldername" nameText (StartEditingFolderName nameText) ChangeFolderName (restrictMessage (\x -> String.length x > 0) (SetFolderName folderId))
                                     ]
                                 ]
@@ -1640,7 +1645,7 @@ viewFolderDetails offset here time folderView fs =
                        -- , div [ class "ui segment attached" ]
                        --     [ viewCheckbox "Share folder" (Folder.isSharing folder) (ShareFolder (Folder.id folder) (not <| Folder.isSharing folder)) "" ]
                        , viewCheckbox "View old tasks" folderView.viewOld (SetViewOld (not folderView.viewOld)) ""
-                       , viewFolderList here time folderId fs
+                       , viewFolderList here time folderView.draggingOver folderId fs
                        , viewTaskList offset here time folderId fs folderView
                        , viewButton "addtask right floated primary" "Add Task" (CreateTask folderId)
                        , viewButton "addfolder right floated primary" "Add Folder" (CreateFolder folderId)
@@ -1780,17 +1785,35 @@ editableField editing elementId name currentlyEditingMsg workingMsg setValue =
         ]
 
 
-viewBreadcrumbSections : FileSystem -> Id Folder -> List (Html Msg)
-viewBreadcrumbSections fs folderId =
+viewBreadcrumbSections : Maybe (Id Folder) -> FileSystem -> Id Folder -> List (Html Msg)
+viewBreadcrumbSections dropFolder fs folderId =
+    let
+        createBreadcrumbSection id name =
+            [ a
+                [ class <|
+                    if Just id == dropFolder then
+                        "clickable section dropover"
+
+                    else
+                        "clickable section"
+                , onClick (SetView id)
+                , onDragOver (SetDraggingOver (Just id))
+                , onDragLeave (SetDraggingOver Nothing)
+                , onDrop (DropMoveTask id)
+                ]
+                [ text name ]
+            , div [ class "divider" ] [ text "/" ]
+            ]
+    in
     case FileSystem.folderParent folderId fs of
         Just parentId ->
             if parentId == Id.rootId then
-                [ a [ class "breadcrumb clickable", onClick (SetView parentId), onDragOver NoOp, onDrop (DropMoveTask Id.rootId) ] [ text "My Tasks" ], div [ class "divider" ] [ text "/" ] ]
+                createBreadcrumbSection Id.rootId "My Tasks"
 
             else
                 case FileSystem.getFolder parentId fs of
                     Just folder ->
-                        viewBreadcrumbSections fs parentId ++ [ a [ class "clickable section", onClick (SetView parentId), onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)) ] [ text (Folder.name folder) ], div [ class "divider" ] [ text "/" ] ]
+                        viewBreadcrumbSections dropFolder fs parentId ++ createBreadcrumbSection (Folder.id folder) (Folder.name folder)
 
                     Nothing ->
                         []
@@ -1799,8 +1822,8 @@ viewBreadcrumbSections fs folderId =
             []
 
 
-viewFolderList : Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> Html Msg
-viewFolderList here time folderId fs =
+viewFolderList : Time.Zone -> Time.Posix -> Maybe (Id Folder) -> Id Folder -> FileSystem -> Html Msg
+viewFolderList here time dragOverFolder folderId fs =
     let
         childrenFolders =
             FileSystem.foldersInFolder folderId fs
@@ -1811,7 +1834,7 @@ viewFolderList here time folderId fs =
         labeledFolders =
             List.reverse <| List.map (\folder -> ( folder, Statistics.folderLabelWithId taskLabels (Folder.id folder) fs )) childrenFolders
     in
-    viewCards (List.map (\( folder, label ) -> viewFolderCard label folder) labeledFolders)
+    viewCards (List.map (\( folder, label ) -> viewFolderCard dragOverFolder label folder) labeledFolders)
 
 
 viewTaskList : String -> Time.Zone -> Time.Posix -> Id Folder -> FileSystem -> FolderView -> Html Msg
@@ -1871,11 +1894,28 @@ labelToColor label =
             "done"
 
 
-viewFolderCard : Statistics.Label -> Folder -> Html Msg
-viewFolderCard label folder =
-    div [ class "folder", onDragStart (StartDrag (FolderId (Folder.id folder))), onDragOver EndDrag, onDragOver NoOp, onDrop (DropMoveTask (Folder.id folder)), draggable "true" ]
+viewFolderCard : Maybe (Id Folder) -> Statistics.Label -> Folder -> Html Msg
+viewFolderCard dragOverFolder label folder =
+    div
+        [ class <|
+            if dragOverFolder == Just (Folder.id folder) then
+                "folder dropover"
+
+            else
+                "folder"
+        , onDragStart (StartDrag (FolderId (Folder.id folder)))
+        , onDragOver EndDrag
+        , onDragOver (SetDraggingOver (Just (Folder.id folder)))
+        , onDragLeave (SetDraggingOver Nothing)
+        , onDrop (DropMoveTask (Folder.id folder))
+        , draggable "true"
+        ]
         [ viewIcon <| "foldericon " ++ labelToColor label
-        , div [ class "foldername clickable", onClick (SetView (Folder.id folder)) ] [ text (Folder.name folder) ]
+        , div
+            [ class "foldername clickable"
+            , onClick (SetView (Folder.id folder))
+            ]
+            [ text (Folder.name folder) ]
         , div [ class "icon trash delete clickable", onClick (ConfirmDeleteFolder (Folder.id folder)) ] []
         ]
 
@@ -1883,6 +1923,12 @@ viewFolderCard label folder =
 onDragStart : msg -> Attribute msg
 onDragStart msg =
     on "dragstart" <|
+        D.succeed msg
+
+
+onDragLeave : msg -> Attribute msg
+onDragLeave msg =
+    on "dragleave" <|
         D.succeed msg
 
 

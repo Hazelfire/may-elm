@@ -273,8 +273,14 @@ input:invalid
 .breadcrumbs
   list-style: none
   font-size: 1rem
+  .section
+    display: inline-block
   .breadcrumb
     display: inline-block
+  .section.dropover
+    font-weight: bold
+    border-radius: 0.3rem
+    background-color: $background
   .divider
     display: inline-block
 
@@ -321,7 +327,8 @@ input:invalid
   color: $foreground
 
 @mixin task
-  margin-top: 0.5rem
+  padding-top: 0.25rem
+  padding-bottom: 0.25rem
   align-items: center
   .taskname .autoexpand
     &::after
@@ -384,7 +391,13 @@ input:invalid
 
 @mixin folder
   align-items: center
-  margin-top: 0.5rem
+  padding-top: 0.25rem
+  padding-bottom: 0.25rem
+
+  &.dropover
+    font-weight: bold
+    border-radius: 0.3rem
+    background-color: $background
   .foldername
     display: inline-block
     margin-left: 0.5rem
