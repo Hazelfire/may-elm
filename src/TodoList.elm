@@ -1216,32 +1216,6 @@ viewUrgencyTaskBar xscale yscale { label, parent, urgency, start, end, task } =
 
 viewHeader : Model -> Html Msg
 viewHeader model =
-    let
-        status =
-            case model.authState of
-                Auth.Authenticated _ ->
-                    case model.syncStatus of
-                        SyncOffline ->
-                            "Offline"
-
-                        Synced ->
-                            "Synced"
-
-                        Retreiving ->
-                            "Retreiving"
-
-                        RetreiveFailed ->
-                            "RetrieveFailed"
-
-                        Updating ->
-                            "Updating"
-
-                        UpdateFailed ->
-                            "UpdateFailed"
-
-                _ ->
-                    Auth.authStateToString model.authState
-    in
     nav [ class "top-menu" ]
         [ li
             [ class
@@ -1284,21 +1258,15 @@ viewHeader model =
                             )
                         ]
              in
-             (case model.retryCommand of
-                Just _ ->
-                    [ li [ class "item clickable", onClick SendRetry ] [ text "Retry" ], showTreeButton ]
+             [ showTreeButton
+             , case model.authState of
+                Auth.Authenticated _ ->
+                    --[ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
+                    li [ class "item", onClick Logout ] [ text "Logout" ]
 
-                Nothing ->
-                    [ showTreeButton ]
-             )
-                ++ [ case model.authState of
-                        Auth.Authenticated _ ->
-                            --[ div [ class "item", onClick ConfirmDeleteAccount ] [ text "Delete Account" ]
-                            li [ class "item", onClick Logout ] [ text "Logout" ]
-
-                        _ ->
-                            a [ class "item loginbutton", href <| loginUrl model.variables ] [ text "Sign in" ]
-                   ]
+                _ ->
+                    a [ class "item loginbutton", href <| loginUrl model.variables ] [ text "Sign in" ]
+             ]
             )
         ]
 

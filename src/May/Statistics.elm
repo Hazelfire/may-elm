@@ -218,7 +218,11 @@ firstWith func list =
 
 groupTasks_ : Time.Zone -> Time.Posix -> List Task -> List TaskGroup -> List TaskGroup
 groupTasks_ here now tasks groups =
-    case tasks of
+    let
+        ( overdue, notoverdue ) =
+            firstWith (Task.due >> Maybe.withDefault now >> Time.posixToMillis >> (>) (Time.posixToMillis now)) tasks
+    in
+    case notoverdue of
         [] ->
             groups
 
@@ -239,7 +243,7 @@ groupTasks_ here now tasks groups =
                     List.partition (isDoneToday here now) (task :: samedue)
 
                 newTaskGroup =
-                    newGroup now (doneLater_ ++ doneToday_) due
+                    newGroup now (doneLater_ ++ doneToday_ ++ overdue) due
 
                 newStart =
                     case Task.due task of
@@ -446,6 +450,11 @@ startOfDay zone time =
 endOfYesterday : Time.Zone -> Time.Posix -> Time.Posix
 endOfYesterday zone time =
     Time.millisToPosix <| Time.posixToMillis (startOfDay zone time) - 1000
+
+
+endOfToday : Time.Zone -> Time.Posix -> Time.Posix
+endOfToday zone time =
+    Time.millisToPosix <| Time.posixToMillis (endOfYesterday zone time) + (24 * 60 * 60 * 1000)
 
 
 isDoneToday : Time.Zone -> Time.Posix -> Task -> Bool
